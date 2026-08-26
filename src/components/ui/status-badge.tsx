@@ -51,6 +51,31 @@ const fulfillmentConfigs: Record<string, BadgeConfig> = {
     label: "Unknown",
     className: "bg-slate-100 text-slate-700 border-slate-200/80",
     dot: "bg-slate-400"
+  },
+  IN_PROGRESS: {
+    label: "In Progress",
+    className: "bg-blue-50 text-blue-700 border-blue-200/80",
+    dot: "bg-blue-400"
+  },
+  PENDING_FULFILLMENT: {
+    label: "Pending Fulfillment",
+    className: "bg-amber-50 text-amber-800 border-amber-200/80",
+    dot: "bg-amber-500"
+  },
+  SCHEDULED: {
+    label: "Scheduled",
+    className: "bg-indigo-50 text-indigo-700 border-indigo-200/80",
+    dot: "bg-indigo-500"
+  },
+  REQUEST_DECLINED: {
+    label: "Request Declined",
+    className: "bg-red-50 text-red-700 border-red-200/80",
+    dot: "bg-red-500"
+  },
+  RESTOCKED: {
+    label: "Restocked",
+    className: "bg-slate-100 text-slate-700 border-slate-200/80",
+    dot: "bg-slate-500"
   }
 };
 
