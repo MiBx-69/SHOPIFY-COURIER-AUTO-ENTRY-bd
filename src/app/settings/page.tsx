@@ -4,7 +4,6 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ShopifyCard } from "@/features/settings/shopify-card";
 import { ShopifyConnect } from "@/features/settings/shopify-connect";
-import { PasskeyManager } from "@/features/settings/passkey-manager";
 import { CourierSettings, type CourierConfig } from "@/features/settings/courier-settings";
 import { IntegrationAuditLog } from "@/features/settings/integration-audit-log";
 
@@ -120,18 +119,7 @@ export default async function SettingsPage() {
           </section>
         )}
 
-        {/* ── Security ──────────────────────────────────────────────────── */}
-        <section>
-          <div className="mb-3">
-            <h2 className="text-base font-bold text-slate-900">Security</h2>
-            <p className="text-sm text-slate-500">
-              Passkeys are the preferred sign-in method. Email remains a secure fallback.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
-            <PasskeyManager />
-          </div>
-        </section>
+
 
         {/* ── Integration Audit Log ─────────────────────────────────────── */}
         {shop && (
