@@ -3124,4 +3124,54 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
   - **Session Security**: Provides "Sign out other sessions" to revoke active tokens on other devices.
 - **Cryptographic Security**: Raw private keys never leave the merchant's hardware; only public key credentials and counter data are verified by Supabase Auth.
 
+---
+
+# 94. Mobile-First Responsive UI/UX Architecture
+
+### 1. Architectural Philosophy: Strict Mobile-First Layouts
+- **Target Mobile Viewports**: 320px, 375px, 390px, 430px designed first with zero horizontal page scrolling.
+- **Progressive Enhancement**: Seamless scaling to 768px (Tablet), 1024px (Laptop), 1280px, 1440px+ (Desktop).
+- **Viewport Confinement (`globals.css`)**:
+  - `html, body { max-width: 100vw; overflow-x: hidden; }`
+  - Strict `min-w-0 flex-1` on main containers preventing child elements from breaking page boundaries.
+  - `.no-scrollbar` utility for smooth internal horizontal swiping on quick-filter strips and tabs without page-level scroll.
+
+### 2. App Shell & Navigation
+- **Desktop Sidebar (`md:block`)**: Fixed, stable width (224px - 240px) with `/logo.png`, app identity, and navigation items.
+- **Mobile Fixed Bottom Navigation (`md:hidden`)**:
+  - Pinned to viewport bottom with safe-area support (`env(safe-area-inset-bottom)`).
+  - Touch-friendly 44px hit targets for `Orders`, `Dispatched`, and `Settings`.
+  - Main container includes `pb-28` buffer ensuring bottom navigation never obscures content.
+
+### 3. Strict Separation of Orders Queue vs Dispatched History
+- **Orders Page (`/orders`)**:
+  - Primary operational queue with compact tabs: `Ready to Dispatch`, `Unfulfilled`, `Pending Payment`, `Attention Required`, `Skipped`, `Failed`, `Cancelled`, `All Orders`.
+  - Dispatched orders are routed to the dedicated Dispatched interface.
+- **Dispatched Page (`/dispatched`)**:
+  - Dedicated history interface with time filters: `All Time`, `Today`, `Yesterday`, `7 Days`, `30 Days`.
+  - Dispatched-specific filters: Courier provider, Delivery status, Pickup location.
+  - Compact empty state ("No dispatched orders found. Orders sent to couriers will appear here.").
+
+### 4. High-Density Mobile Order Cards vs Desktop Table
+- **Mobile View (320px - 767px)**:
+  - Compact cards (~85–100px height) displaying:
+    - Row 1: Checkbox (44px touch area) | Order Number (`#1451`) | Total COD (`৳1,280`).
+    - Row 2: Customer Name | Customer Phone Number.
+    - Row 3: Status Badges (`● Unfulfilled`, `● COD`, `● Status`, Date) | Quick Action (`[Dispatch]`, `[Retry]`, `[Restore]`, `[Cancel]`).
+  - Top `[☐] Select All` banner displaying visible order count.
+- **Desktop View (768px+)**:
+  - Compact table (~48–54px row height) with contained horizontal scroll area for ultra-dense display.
+
+### 5. Floating Bulk Action Bar
+- **Mobile Experience**:
+  - When orders are selected, a floating dark bar appears above the bottom navigation:
+    `bottom-[calc(env(safe-area-inset-bottom)+54px)]`
+  - Provides instant `[Dispatch Selected (X)]`, `[Restore]`, `[Cancel]`, and `[Clear]` actions.
+- **Desktop Experience**: Top floating banner with full batch controls.
+
+### 6. Mobile Bottom Sheets
+- **Filter Sheet**: Slide-up bottom sheet with Date, Payment, Fulfillment, and Courier selectors.
+- **Dispatch Confirmation & Pickup Location Sheet**: Touch-friendly bottom sheet displaying order summary, courier picker, and pickup warehouse dropdown.
+
+
 
