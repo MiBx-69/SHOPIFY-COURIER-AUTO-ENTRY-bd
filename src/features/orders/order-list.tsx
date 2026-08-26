@@ -1341,14 +1341,27 @@ export function OrderList({
                         ) : (
                           <button
                             onClick={() => openSingleDispatchModal(order)}
-                            disabled={actionLoadingId === order.id}
+                            disabled={isDispatching}
                             className={cn(
-                              "h-6.5 px-2.5 rounded text-white text-[10px] font-semibold inline-flex items-center gap-1 disabled:opacity-50 shadow-2xs cursor-pointer",
-                              isFailed ? "bg-amber-600 hover:bg-amber-500" : "bg-slate-900 hover:bg-slate-800"
+                              "h-6.5 px-2.5 rounded text-white text-[10px] font-semibold inline-flex items-center gap-1 shadow-2xs",
+                              isDispatching
+                                ? "bg-slate-400 cursor-not-allowed opacity-80"
+                                : isFailed
+                                ? "bg-amber-600 hover:bg-amber-500 cursor-pointer"
+                                : "bg-slate-900 hover:bg-slate-800 cursor-pointer"
                             )}
                           >
-                            {actionLoadingId === order.id ? <RefreshCw size={10} className="animate-spin" /> : <Truck size={10} />}
-                            {isFailed ? "Retry" : "Dispatch"}
+                            {isDispatching ? (
+                              <>
+                                <RefreshCw size={10} className="animate-spin" />
+                                <span>Dispatching…</span>
+                              </>
+                            ) : (
+                              <>
+                                <Truck size={10} />
+                                <span>{isFailed ? "Retry" : "Dispatch"}</span>
+                              </>
+                            )}
                           </button>
                         )}
                       </div>
