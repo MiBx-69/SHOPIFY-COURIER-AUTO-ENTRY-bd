@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, SlidersHorizontal, Truck, AlertCircle, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { 
+  Search, 
+  RefreshCw, 
+  Truck, 
+  AlertCircle, 
+  ChevronLeft, 
+  ChevronRight, 
+  X,
+  Clock,
+  CheckCircle2,
+  Copy,
+  Check
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { money, cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
@@ -21,6 +34,7 @@ type Order = {
   order_number: number;
   customer_name: string | null;
   customer_phone: string | null;
+  customer_email: string | null;
   total_minor: number;
   currency: string;
   fulfillment_status: string | null;
@@ -29,20 +43,43 @@ type Order = {
   shopify_updated_at: string;
   cancelled_at: string | null;
   order_line_items: LineItem[];
-  dispatches?: Array<{ tracking_id?: string; courier_status?: string; courier_configs?: { couriers?: { provider?: string } } }>;
+  dispatches?: Array<{
+    tracking_id?: string;
+    courier_status?: string;
+    courier_configs?: {
+      couriers?: {
+        provider?: string;
+        display_name?: string;
+      };
+    };
+  }>;
 };
 
 const FILTERS = [
   { id: "all", label: "All" },
-  { id: "pending", label: "Pending" },
   { id: "unfulfilled", label: "Unfulfilled" },
-  { id: "on_hold", label: "On Hold" },
-  { id: "partially_fulfilled", label: "Partially Fulfilled" },
-  { id: "fulfilled", label: "Fulfilled" },
+  { id: "pending", label: "Pending" },
   { id: "dispatched", label: "Dispatched" },
+  { id: "partially_fulfilled", label: "Partial" },
+  { id: "fulfilled", label: "Fulfilled" },
+  { id: "on_hold", label: "On Hold" },
   { id: "failed", label: "Failed" },
   { id: "cancelled", label: "Cancelled" }
 ];
+
+const PAGE_SIZES = [50, 100, 200];
+
+function fmtShortDate(dateStr: string | null) {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtFullDate(dateStr: string | null) {
+  if (!dateStr) return "—";
+  const d = new Date(dateStr);
+  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+}
 
 export function OrderList({ 
   shopId, 
@@ -61,13 +98,21 @@ export function OrderList({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
   const [selected, setSelected] = useState<string[]>([]);
-  const [notice, setNotice] = useState<string>();
+  const [notice, setNotice] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
   
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
   const [totalCount, setTotalCount] = useState(0);
-  const size = 20;
+  const [dispatchingId, setDispatchingId] = useState<string | null>(null);
+  const [selectedCouriers, setSelectedCouriers] = useState<Record<string, string>>({});
+  const [copiedTracking, setCopiedTracking] = useState<string | null>(null);
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
+
+  // Total pages
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
+  const startItem = totalCount === 0 ? 0 : page * pageSize + 1;
+  const endItem = Math.min((page + 1) * pageSize, totalCount);
 
   async function load() {
     setLoading(true);
@@ -78,7 +123,7 @@ export function OrderList({
         filter,
         q: search,
         page: page.toString(),
-        size: size.toString()
+        size: pageSize.toString()
       });
       const response = await fetch(`/api/orders?${params}`);
       const body = await response.json();
@@ -92,260 +137,661 @@ export function OrderList({
     }
   }
 
-  // Reload when filters change
+  // Reset page when filter, search, or pageSize changes
   useEffect(() => {
-    setPage(0); // Reset page on filter/search change
-  }, [shopId, filter, search]);
+    setPage(0);
+  }, [shopId, filter, search, pageSize]);
 
+  // Fetch when page, filter, search, pageSize, or shopId changes
   useEffect(() => {
-    const timer = window.setTimeout(load, search ? 300 : 0);
+    const timer = window.setTimeout(load, search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [shopId, filter, search, page]);
+  }, [shopId, filter, search, page, pageSize]);
 
+  // Realtime updates
   useEffect(() => {
     const channel = createClient()
       .channel(`orders:${shopId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `shop_id=eq.${shopId}` }, () => load())
+      .on("postgres_changes", { event: "*", schema: "public", table: "dispatches", filter: `shop_id=eq.${shopId}` }, () => load())
       .subscribe();
     return () => {
       createClient().removeChannel(channel);
     };
   }, [shopId]);
 
-  async function dispatch(orderId: string, courierConfigId?: string) {
+  async function dispatchSingle(orderId: string, courierConfigId?: string) {
     if (!window.confirm("Confirm dispatch? A courier shipment will be created.")) return;
-    setNotice("Dispatching…");
+    setDispatchingId(orderId);
+    setNotice({ text: "Dispatching order…", type: "info" });
     try {
       const response = await fetch("/api/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, courierConfigId, idempotencyKey: crypto.randomUUID() })
+        body: JSON.stringify({ 
+          orderId, 
+          courierConfigId: courierConfigId || selectedCouriers[orderId], 
+          idempotencyKey: crypto.randomUUID() 
+        })
       });
       const body = await response.json();
-      setNotice(response.ok ? `Dispatched${body.data?.tracking_id ? ` · ${body.data.tracking_id}` : ""}` : body.error || "Dispatch could not be completed");
-      load();
+      if (response.ok) {
+        setNotice({ 
+          text: `Order dispatched successfully! Tracking: ${body.data?.tracking_id || "Generated"}`, 
+          type: "success" 
+        });
+        load();
+      } else {
+        setNotice({ text: body.error || "Dispatch failed", type: "error" });
+      }
     } catch {
-      setNotice("Network error during dispatch.");
+      setNotice({ text: "Network error during dispatch.", type: "error" });
+    } finally {
+      setDispatchingId(null);
     }
   }
 
-  async function bulk() {
+  async function bulkDispatch() {
     if (!selected.length || !window.confirm(`Dispatch ${selected.length} selected orders?`)) return;
-    setNotice("Bulk dispatch is processing…");
-    const response = await fetch("/api/dispatch/bulk", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ orderIds: selected })
-    });
-    const body = await response.json();
-    const results = body.data || [];
-    setNotice(`${results.filter((r: { status: string }) => r.status === "dispatched").length} dispatched · ${results.filter((r: { status: string }) => r.status !== "dispatched").length} skipped or failed`);
-    setSelected([]);
-    load();
+    setNotice({ text: `Processing bulk dispatch for ${selected.length} orders…`, type: "info" });
+    try {
+      const response = await fetch("/api/dispatch/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderIds: selected })
+      });
+      const body = await response.json();
+      const results = body.data || [];
+      const succeeded = results.filter((r: { status: string }) => r.status === "dispatched").length;
+      const failed = results.filter((r: { status: string }) => r.status !== "dispatched").length;
+      setNotice({ 
+        text: `Bulk dispatch completed: ${succeeded} dispatched, ${failed} skipped/failed.`, 
+        type: succeeded > 0 ? "success" : "error" 
+      });
+      setSelected([]);
+      load();
+    } catch {
+      setNotice({ text: "Network error during bulk dispatch.", type: "error" });
+    }
   }
 
-  const hasNextPage = (page + 1) * size < totalCount;
+  function toggleSelectAllPage() {
+    const pageIds = orders.map(o => o.id);
+    const allSelected = pageIds.every(id => selectedSet.has(id));
+    if (allSelected) {
+      setSelected(prev => prev.filter(id => !pageIds.includes(id)));
+    } else {
+      setSelected(prev => Array.from(new Set([...prev, ...pageIds])));
+    }
+  }
+
+  function copyTrackingToClipboard(tracking: string) {
+    navigator.clipboard.writeText(tracking);
+    setCopiedTracking(tracking);
+    setTimeout(() => setCopiedTracking(null), 2000);
+  }
+
+  const allOnPageSelected = orders.length > 0 && orders.every(o => selectedSet.has(o.id));
+  const someOnPageSelected = orders.some(o => selectedSet.has(o.id)) && !allOnPageSelected;
+
+  // Render pagination buttons (e.g. 1 2 3 ... 25)
+  const paginationRange = useMemo(() => {
+    const delta = 2;
+    const range: (number | string)[] = [];
+    for (let i = 0; i < totalPages; i++) {
+      if (
+        i === 0 || 
+        i === totalPages - 1 || 
+        (i >= page - delta && i <= page + delta)
+      ) {
+        range.push(i);
+      } else if (range[range.length - 1] !== "...") {
+        range.push("...");
+      }
+    }
+    return range;
+  }, [page, totalPages]);
 
   return (
-    <section>
-      <div className="sticky top-0 z-10 -mx-4 bg-slate-50 px-4 pb-3 pt-1 md:static md:mx-0 md:px-0">
-        <div className="flex gap-2">
-          <label className="flex min-h-11 flex-1 items-center gap-2 rounded-xl bg-white px-3 ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-slate-400">
-            <Search size={18} className="text-slate-400" />
+    <div className="space-y-2.5">
+      {/* ─── COMPACT HEADER / CONTROLS ─── */}
+      <div className="flex flex-col gap-2 bg-white p-3 rounded-lg border border-slate-200 shadow-2xs">
+        {/* Row 1: Search & Quick Refresh */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
+              type="text"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search order, customer, phone"
-              className="w-full bg-transparent text-sm outline-none"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search orders by number, customer, phone, email, SKU, tracking..."
+              className="h-8.5 w-full rounded-md border border-slate-200 bg-slate-50/50 pl-8 pr-7 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
             />
-          </label>
-          <Button variant="secondary" aria-label="Filter" onClick={() => load()}>
-            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
-          </Button>
+            {search && (
+              <button 
+                onClick={() => setSearch("")} 
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+
+          <button
+            onClick={() => load()}
+            disabled={loading}
+            title="Refresh list"
+            className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 transition-colors"
+          >
+            <RefreshCw size={13} className={cn(loading && "animate-spin text-slate-900")} />
+          </button>
         </div>
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-          {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
-              className={cn(
-                "whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition-colors",
-                filter === f.id
-                  ? "bg-slate-950 text-white"
-                  : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-              )}
-            >
-              {f.label}
-            </button>
-          ))}
+
+        {/* Row 2: Filter Pills & Status */}
+        <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pt-0.5">
+          <div className="flex items-center gap-1 shrink-0">
+            {FILTERS.map((f) => {
+              const active = filter === f.id;
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setFilter(f.id)}
+                  className={cn(
+                    "h-6.5 px-2.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap",
+                    active
+                      ? "bg-slate-900 text-white font-semibold shadow-2xs"
+                      : "bg-slate-100/80 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                  )}
+                >
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="hidden sm:flex items-center gap-2 text-[11px] text-slate-500 font-medium shrink-0 pl-2">
+            <span>Total: <strong className="text-slate-900 font-semibold">{totalCount.toLocaleString()}</strong> orders</span>
+          </div>
         </div>
       </div>
 
+      {/* ─── BULK SELECTION BAR ─── */}
       {selected.length > 0 && (
-        <div className="mb-3 flex items-center justify-between rounded-xl bg-slate-950 p-3 text-sm font-semibold text-white animate-in slide-in-from-top-2">
-          <span>{selected.length} selected</span>
-          <Button className="min-h-8 bg-white text-slate-950 hover:bg-slate-100" onClick={bulk}>
-            Bulk dispatch
+        <div className="flex items-center justify-between rounded-lg bg-slate-900 px-3.5 py-2 text-xs text-white shadow-sm animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold">{selected.length} order{selected.length > 1 ? "s" : ""} selected</span>
+            <button 
+              onClick={() => setSelected([])}
+              className="text-slate-400 hover:text-white text-[11px] underline ml-1"
+            >
+              Clear
+            </button>
+          </div>
+          <Button 
+            onClick={bulkDispatch}
+            className="h-7 px-3 text-xs bg-white text-slate-900 hover:bg-slate-100 font-medium shadow-none rounded"
+          >
+            <Truck size={13} className="mr-1.5" />
+            Bulk Dispatch ({selected.length})
           </Button>
         </div>
       )}
 
+      {/* ─── STATUS NOTICE ─── */}
       {notice && (
-        <p role="status" className="mb-3 rounded-xl bg-sky-50 p-3 text-sm font-medium text-sky-900 border border-sky-100 animate-in fade-in">
-          {notice}
-        </p>
+        <div className={cn(
+          "flex items-center justify-between rounded-md px-3 py-2 text-xs border animate-in fade-in",
+          notice.type === "success" && "bg-emerald-50 text-emerald-800 border-emerald-200",
+          notice.type === "error" && "bg-red-50 text-red-800 border-red-200",
+          notice.type === "info" && "bg-sky-50 text-sky-800 border-sky-200"
+        )}>
+          <div className="flex items-center gap-2">
+            {notice.type === "success" && <CheckCircle2 size={14} className="text-emerald-600 shrink-0" />}
+            {notice.type === "error" && <AlertCircle size={14} className="text-red-600 shrink-0" />}
+            {notice.type === "info" && <Clock size={14} className="text-sky-600 shrink-0" />}
+            <span>{notice.text}</span>
+          </div>
+          <button onClick={() => setNotice(null)} className="text-slate-400 hover:text-slate-600 ml-2">
+            <X size={13} />
+          </button>
+        </div>
       )}
 
-      <div className="space-y-3">
-        {error ? (
-          <div className="rounded-2xl bg-red-50 p-5 text-sm text-red-700 flex flex-col items-center border border-red-100">
-            <AlertCircle size={24} className="mb-2" />
-            <p className="font-semibold">Failed to load orders</p>
-            <p className="mt-1">{error}</p>
-          </div>
-        ) : loading && orders.length === 0 ? (
-          <div className="rounded-2xl bg-white p-8 text-center ring-1 ring-slate-200">
-            <RefreshCw size={24} className="mx-auto animate-spin text-slate-400 mb-2" />
-            <p className="text-sm text-slate-500">Loading orders...</p>
+      {/* ─── ERROR STATE ─── */}
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg bg-red-50 p-3 text-xs text-red-700 border border-red-200">
+          <AlertCircle size={15} className="shrink-0" />
+          <span className="font-semibold">Error:</span>
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* ─── DESKTOP ORDERS TABLE ─── */}
+      <div className="hidden md:block overflow-hidden rounded-lg border border-slate-200 bg-white shadow-2xs">
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+              <th className="w-9 px-3 py-2 text-center">
+                <input
+                  type="checkbox"
+                  checked={allOnPageSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = someOnPageSelected;
+                  }}
+                  onChange={toggleSelectAllPage}
+                  className="size-3.5 rounded border-slate-300 text-slate-900 focus:ring-0 cursor-pointer"
+                />
+              </th>
+              <th className="px-2.5 py-2">Order</th>
+              <th className="px-2.5 py-2">Customer</th>
+              <th className="px-2.5 py-2">Items</th>
+              <th className="px-2.5 py-2 text-right">Total</th>
+              <th className="px-2.5 py-2">Payment</th>
+              <th className="px-2.5 py-2">Fulfillment</th>
+              <th className="px-2.5 py-2">Courier</th>
+              <th className="px-2.5 py-2">Dispatch</th>
+              <th className="px-2.5 py-2">Date</th>
+              <th className="px-3 py-2 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 text-xs">
+            {loading && orders.length === 0 ? (
+              <tr>
+                <td colSpan={11} className="py-12 text-center text-slate-400">
+                  <RefreshCw size={18} className="mx-auto animate-spin mb-1.5" />
+                  <p className="text-xs font-medium">Loading orders…</p>
+                </td>
+              </tr>
+            ) : orders.length === 0 ? (
+              <tr>
+                <td colSpan={11} className="py-10 text-center text-slate-500">
+                  <p className="font-semibold text-slate-800">No orders found</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {search ? "No orders match your search criteria." : "No orders found for this filter."}
+                  </p>
+                </td>
+              </tr>
+            ) : (
+              orders.map((order) => {
+                const isSelected = selectedSet.has(order.id);
+                const dispatchRecord = order.dispatches?.[0];
+                const tracking = dispatchRecord?.tracking_id;
+                const courierName = dispatchRecord?.courier_configs?.couriers?.display_name || dispatchRecord?.courier_configs?.couriers?.provider;
+                const totalItemCount = order.order_line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0;
+                const isDispatched = order.dispatch_status === "dispatched";
+                const isFailed = order.dispatch_status === "failed";
+                const isCancelled = Boolean(order.cancelled_at);
+
+                return (
+                  <tr 
+                    key={order.id} 
+                    className={cn(
+                      "hover:bg-slate-50/80 transition-colors h-[48px]",
+                      isSelected && "bg-slate-50/90"
+                    )}
+                  >
+                    {/* Select Checkbox */}
+                    <td className="px-3 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {
+                          setSelected(prev => 
+                            isSelected ? prev.filter(id => id !== order.id) : [...prev, order.id]
+                          );
+                        }}
+                        className="size-3.5 rounded border-slate-300 text-slate-900 focus:ring-0 cursor-pointer"
+                      />
+                    </td>
+
+                    {/* Order # */}
+                    <td className="px-2.5 py-1.5 font-semibold text-slate-900 whitespace-nowrap">
+                      <Link 
+                        href={`/orders/${order.id}`}
+                        className="hover:underline text-slate-900 font-mono flex items-center gap-1"
+                      >
+                        {order.name}
+                      </Link>
+                    </td>
+
+                    {/* Customer */}
+                    <td className="px-2.5 py-1.5 max-w-[140px] truncate text-slate-700" title={order.customer_name || "—"}>
+                      <span className="font-medium truncate block">{order.customer_name || "—"}</span>
+                      {order.customer_phone && (
+                        <span className="text-[11px] text-slate-400 font-mono block truncate">{order.customer_phone}</span>
+                      )}
+                    </td>
+
+                    {/* Items */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-slate-600">
+                      <span 
+                        className="cursor-default border-b border-dotted border-slate-300"
+                        title={order.order_line_items?.map(i => `${i.quantity}x ${i.title}${i.sku ? ` (${i.sku})` : ""}`).join("\n")}
+                      >
+                        {totalItemCount} {totalItemCount === 1 ? "item" : "items"}
+                      </span>
+                    </td>
+
+                    {/* Total */}
+                    <td className="px-2.5 py-1.5 text-right font-semibold text-slate-900 whitespace-nowrap">
+                      {money(order.total_minor, order.currency)}
+                    </td>
+
+                    {/* Payment */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">
+                      <span className={cn(
+                        "inline-flex items-center text-[11px] font-medium",
+                        order.financial_status === "PAID" ? "text-emerald-700" :
+                        order.financial_status === "PENDING" ? "text-amber-700" :
+                        order.financial_status === "REFUNDED" ? "text-slate-500 line-through" :
+                        "text-slate-600"
+                      )}>
+                        <span className={cn(
+                          "size-1.5 rounded-full mr-1.5 shrink-0",
+                          order.financial_status === "PAID" ? "bg-emerald-500" :
+                          order.financial_status === "PENDING" ? "bg-amber-500" :
+                          "bg-slate-400"
+                        )} />
+                        {order.financial_status === "PAID" ? "Paid" :
+                         order.financial_status === "PENDING" ? "COD" :
+                         order.financial_status || "—"}
+                      </span>
+                    </td>
+
+                    {/* Fulfillment */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">
+                      <span className={cn(
+                        "text-[11px] font-medium",
+                        order.fulfillment_status === "FULFILLED" ? "text-emerald-700" :
+                        order.fulfillment_status === "PARTIALLY_FULFILLED" ? "text-blue-700" :
+                        "text-slate-600"
+                      )}>
+                        {order.fulfillment_status === "FULFILLED" ? "Fulfilled" :
+                         order.fulfillment_status === "PARTIALLY_FULFILLED" ? "Partial" :
+                         "Unfulfilled"}
+                      </span>
+                    </td>
+
+                    {/* Courier */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-slate-600 text-[11px]">
+                      {courierName ? (
+                        <span className="font-medium text-slate-800">{courierName}</span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+
+                    {/* Dispatch Status & Tracking */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap">
+                      {isDispatched ? (
+                        <div className="flex items-center gap-1">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
+                            Dispatched
+                          </span>
+                          {tracking && (
+                            <button
+                              onClick={() => copyTrackingToClipboard(tracking)}
+                              title="Click to copy tracking ID"
+                              className="group flex items-center gap-1 font-mono text-[10px] text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors"
+                            >
+                              <span>{tracking}</span>
+                              {copiedTracking === tracking ? (
+                                <Check size={10} className="text-emerald-600" />
+                              ) : (
+                                <Copy size={10} className="opacity-40 group-hover:opacity-100" />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      ) : isFailed ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-200/60">
+                          Failed
+                        </span>
+                      ) : isCancelled ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-500">
+                          Cancelled
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">
+                          Pending
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Date */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-[11px] text-slate-500" title={fmtFullDate(order.shopify_updated_at)}>
+                      {fmtShortDate(order.shopify_updated_at)}
+                    </td>
+
+                    {/* Action Column */}
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap">
+                      {isDispatched ? (
+                        <span className="text-[11px] text-emerald-700 font-medium inline-flex items-center gap-1">
+                          <CheckCircle2 size={13} />
+                          Done
+                        </span>
+                      ) : isCancelled ? (
+                        <span className="text-[11px] text-slate-400">Void</span>
+                      ) : (
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          {!automaticCourier && availableCouriers.length > 0 && (
+                            <select
+                              value={selectedCouriers[order.id] || ""}
+                              onChange={(e) => setSelectedCouriers(prev => ({ ...prev, [order.id]: e.target.value }))}
+                              className="h-6.5 rounded border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700 focus:outline-none"
+                            >
+                              <option value="">Courier…</option>
+                              {availableCouriers.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          )}
+                          <button
+                            onClick={() => dispatchSingle(order.id)}
+                            disabled={dispatchingId === order.id}
+                            className="h-6.5 px-2.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50 shadow-2xs"
+                          >
+                            {dispatchingId === order.id ? (
+                              <RefreshCw size={11} className="animate-spin" />
+                            ) : (
+                              <Truck size={11} />
+                            )}
+                            Dispatch
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ─── MOBILE COMPACT ORDER ROWS (md:hidden) ─── */}
+      <div className="md:hidden divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white overflow-hidden shadow-2xs">
+        {loading && orders.length === 0 ? (
+          <div className="py-8 text-center text-slate-400">
+            <RefreshCw size={16} className="mx-auto animate-spin mb-1" />
+            <p className="text-xs">Loading orders…</p>
           </div>
         ) : orders.length === 0 ? (
-          <div className="rounded-2xl bg-white p-10 text-center ring-1 ring-slate-200">
-            <div className="text-4xl mb-3">📦</div>
-            <p className="font-bold text-lg text-slate-900">No matching orders</p>
-            <p className="mt-1 text-sm text-slate-500">
-              {search ? "No orders matched your search." : "You’re all caught up in this category."}
-            </p>
+          <div className="py-8 text-center text-slate-500">
+            <p className="font-semibold text-xs text-slate-800">No orders found</p>
           </div>
         ) : (
           orders.map((order) => {
-            const tracking = order.dispatches?.[0]?.tracking_id;
-            const courier = order.dispatches?.[0]?.courier_configs?.couriers?.provider;
-            
+            const isSelected = selectedSet.has(order.id);
+            const dispatchRecord = order.dispatches?.[0];
+            const tracking = dispatchRecord?.tracking_id;
+            const courierName = dispatchRecord?.courier_configs?.couriers?.display_name || dispatchRecord?.courier_configs?.couriers?.provider;
+            const totalItemCount = order.order_line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0;
+            const isDispatched = order.dispatch_status === "dispatched";
+
             return (
-              <article key={order.id} className="rounded-2xl bg-white p-4 ring-1 ring-slate-200 hover:ring-slate-300 transition-all">
-                <div className="flex items-start gap-3">
-                  <input
-                    aria-label={`Select ${order.name}`}
-                    type="checkbox"
-                    checked={selectedSet.has(order.id)}
-                    onChange={() =>
-                      setSelected((current) =>
-                        selectedSet.has(order.id)
-                          ? current.filter((id) => id !== order.id)
-                          : [...current, order.id]
-                      )
-                    }
-                    className="mt-1.5 size-4 rounded border-slate-300"
-                  />
-                  <a href={`/orders/${order.id}`} className="min-w-0 flex-1">
-                    <div className="flex justify-between gap-3 items-start">
-                      <div>
-                        <p className="font-bold text-slate-900 text-base">{order.name}</p>
-                        <p className="mt-0.5 text-sm text-slate-500">
-                          {order.customer_name || "No customer name"} 
-                          {order.customer_phone ? ` · ${order.customer_phone}` : ""}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-slate-900">{money(order.total_minor, order.currency)}</p>
-                        <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider">{order.financial_status || "PENDING"}</p>
-                      </div>
-                    </div>
+              <div 
+                key={order.id}
+                className={cn(
+                  "p-2.5 flex items-start gap-2.5 transition-colors",
+                  isSelected && "bg-slate-50/90"
+                )}
+              >
+                {/* Checkbox */}
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => {
+                    setSelected(prev => 
+                      isSelected ? prev.filter(id => id !== order.id) : [...prev, order.id]
+                    );
+                  }}
+                  className="mt-1 size-3.5 rounded border-slate-300 text-slate-900 focus:ring-0 shrink-0"
+                />
 
-                    {/* Products summary */}
-                    <div className="mt-3 bg-slate-50 rounded-lg p-2.5">
-                      {order.order_line_items?.map((item) => (
-                        <div key={item.id} className="flex justify-between items-start text-xs mb-1 last:mb-0">
-                          <div className="flex-1 min-w-0 pr-2">
-                            <span className="font-medium text-slate-700 truncate block">{item.title}</span>
-                            {item.sku && <span className="text-slate-500 font-mono">SKU: {item.sku}</span>}
-                          </div>
-                          <span className="text-slate-600 whitespace-nowrap">x{item.quantity}</span>
-                        </div>
-                      ))}
-                    </div>
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  {/* Top row: Order Number & Total */}
+                  <div className="flex items-baseline justify-between gap-2">
+                    <Link 
+                      href={`/orders/${order.id}`}
+                      className="font-semibold font-mono text-slate-900 text-xs hover:underline flex items-center gap-1 truncate"
+                    >
+                      {order.name}
+                    </Link>
+                    <span className="font-semibold text-slate-900 text-xs shrink-0">
+                      {money(order.total_minor, order.currency)}
+                    </span>
+                  </div>
 
-                    <div className="mt-3 flex flex-wrap gap-2 items-center">
+                  {/* Middle row: Customer & Items */}
+                  <div className="text-[11px] text-slate-600 truncate mt-0.5">
+                    <span>{order.customer_name || "No name"}</span>
+                    <span className="text-slate-400 mx-1">·</span>
+                    <span>{totalItemCount} item{totalItemCount !== 1 ? "s" : ""}</span>
+                  </div>
+
+                  {/* Status & Date row */}
+                  <div className="flex items-center justify-between gap-1 text-[10px] text-slate-500 mt-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className={cn(
-                        "rounded-full px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider",
-                        order.dispatch_status === "dispatched" ? "bg-emerald-100 text-emerald-800"
-                        : order.dispatch_status === "failed" ? "bg-red-100 text-red-800"
-                        : order.dispatch_status === "cancelled" ? "bg-slate-100 text-slate-600"
-                        : "bg-blue-50 text-blue-700"
+                        "font-medium",
+                        order.fulfillment_status === "FULFILLED" ? "text-emerald-700" : "text-amber-700"
                       )}>
-                        {order.dispatch_status.replace("_", " ")}
+                        {order.fulfillment_status === "FULFILLED" ? "Fulfilled" : "Unfulfilled"}
                       </span>
-                      
-                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                        {order.fulfillment_status || "UNFULFILLED"}
+                      <span className="text-slate-300">·</span>
+                      <span className={cn(
+                        "font-medium",
+                        order.financial_status === "PAID" ? "text-emerald-700" : "text-amber-700"
+                      )}>
+                        {order.financial_status === "PAID" ? "Paid" : "COD"}
                       </span>
-                      
-                      {tracking && (
-                        <span className="rounded-full bg-slate-950 px-2.5 py-1 text-[11px] font-bold tracking-wider text-white flex items-center gap-1.5">
-                          {courier?.toUpperCase()} {tracking}
+                      <span className="text-slate-300">·</span>
+                      <span>{fmtShortDate(order.shopify_updated_at)}</span>
+                    </div>
+
+                    {/* Mobile Action / Status */}
+                    <div>
+                      {isDispatched ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60">
+                          {tracking || "Dispatched"}
                         </span>
+                      ) : (
+                        <button
+                          onClick={() => dispatchSingle(order.id)}
+                          disabled={dispatchingId === order.id}
+                          className="h-6 px-2 rounded bg-slate-900 text-white text-[10px] font-medium inline-flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {dispatchingId === order.id ? (
+                            <RefreshCw size={10} className="animate-spin" />
+                          ) : (
+                            <Truck size={10} />
+                          )}
+                          Dispatch
+                        </button>
                       )}
                     </div>
-                  </a>
-                </div>
-
-                {order.dispatch_status !== "dispatched" && order.dispatch_status !== "cancelled" && (
-                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-                    {!automaticCourier && availableCouriers.length > 0 && (
-                      <select 
-                        id={`courier-select-${order.id}`}
-                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm sm:max-w-48"
-                      >
-                        <option value="">Select courier</option>
-                        {availableCouriers.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    )}
-                    <Button
-                      onClick={() => {
-                        const selectElement = document.getElementById(`courier-select-${order.id}`) as HTMLSelectElement | null;
-                        const configId = selectElement?.value;
-                        if (!automaticCourier && !configId) {
-                          alert("Please select a courier first.");
-                          return;
-                        }
-                        dispatch(order.id, configId);
-                      }}
-                      className="flex h-10 w-full items-center justify-center gap-2"
-                    >
-                      <Truck size={17} />
-                      Dispatch Now
-                    </Button>
                   </div>
-                )}
-              </article>
+                </div>
+              </div>
             );
           })
         )}
-        
-        {totalCount > size && (
-          <div className="flex items-center justify-between pt-4 pb-8">
-            <Button 
-              variant="secondary" 
-              disabled={page === 0 || loading} 
+      </div>
+
+      {/* ─── BOTTOM PAGINATION BAR ─── */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 bg-white px-3.5 py-2.5 rounded-lg border border-slate-200 text-xs shadow-2xs">
+        {/* Left: Summary */}
+        <div className="text-slate-500 text-[11px]">
+          Showing <span className="font-semibold text-slate-800">{startItem}–{endItem}</span> of <span className="font-semibold text-slate-800">{totalCount.toLocaleString()}</span> orders
+        </div>
+
+        {/* Center: Numbered Pagination */}
+        {totalPages > 1 && (
+          <div className="flex items-center gap-1">
+            <button
               onClick={() => setPage(p => Math.max(0, p - 1))}
+              disabled={page === 0 || loading}
+              className="h-7 w-7 rounded flex items-center justify-center text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
+              title="Previous page"
             >
-              Previous
-            </Button>
-            <span className="text-sm text-slate-500">
-              Page {page + 1} of {Math.ceil(totalCount / size)}
-            </span>
-            <Button 
-              variant="secondary" 
-              disabled={!hasNextPage || loading} 
-              onClick={() => setPage(p => p + 1)}
+              <ChevronLeft size={14} />
+            </button>
+
+            <div className="flex items-center gap-0.5">
+              {paginationRange.map((item, idx) => {
+                if (item === "...") {
+                  return (
+                    <span key={`dots-${idx}`} className="px-1 text-slate-400 text-xs">
+                      …
+                    </span>
+                  );
+                }
+                const pageNum = item as number;
+                const isCurrent = pageNum === page;
+                return (
+                  <button
+                    key={pageNum}
+                    onClick={() => setPage(pageNum)}
+                    className={cn(
+                      "h-7 min-w-7 px-1.5 rounded text-xs font-medium transition-colors cursor-pointer",
+                      isCurrent
+                        ? "bg-slate-900 text-white font-semibold shadow-2xs"
+                        : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    )}
+                  >
+                    {pageNum + 1}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={page >= totalPages - 1 || loading}
+              className="h-7 w-7 rounded flex items-center justify-center text-slate-600 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:hover:bg-transparent transition-colors cursor-pointer"
+              title="Next page"
             >
-              Next
-            </Button>
+              <ChevronRight size={14} />
+            </button>
           </div>
         )}
+
+        {/* Right: Page Size Selector */}
+        <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+          <span>Per page:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => setPageSize(Number(e.target.value))}
+            className="h-7 rounded border border-slate-200 bg-slate-50/50 px-2 text-xs font-medium text-slate-800 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
+          >
+            {PAGE_SIZES.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
       </div>
-    </section>
+    </div>
   );
 }

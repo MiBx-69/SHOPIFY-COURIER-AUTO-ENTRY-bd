@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { Settings } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { OrderList } from "@/features/orders/order-list";
+
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ shop?: string }> }) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -22,27 +24,45 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       .order("priority");
     couriers = (configs || []).map((c: any) => ({
       id: c.id,
-      name: c.couriers.display_name
+      name: c.couriers?.display_name || "Courier"
     }));
   }
 
   return (
     <AppShell active="Orders">
-      <header className="mb-5 flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-500">{shop?.name || "No store connected"}</p>
-          <h1 className="text-2xl font-bold tracking-tight">Orders</h1>
+      {/* Compact Page Header */}
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-bold tracking-tight text-slate-900">Orders</h1>
+          {shop && (
+            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+              {shop.name}
+            </span>
+          )}
         </div>
-        <Link className="rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white" href="/settings">Settings</Link>
-      </header>
-      {shops && shops.length > 1 && (
-        <select aria-label="Select store" defaultValue={shop?.id} onChange={() => {}} className="mb-4 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3">
-          <option value={shop?.id}>{shop?.name}</option>
-          {shops.filter((item) => item.id !== shop?.id).map((item) => (
-            <option key={item.id} value={item.id}>{item.name}</option>
-          ))}
-        </select>
-      )}
+
+        <div className="flex items-center gap-2">
+          {shops && shops.length > 1 && (
+            <select 
+              aria-label="Select store" 
+              defaultValue={shop?.id} 
+              className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700"
+            >
+              {shops.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          )}
+          <Link 
+            href="/settings"
+            className="flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
+          >
+            <Settings size={13} />
+            <span className="hidden sm:inline">Settings</span>
+          </Link>
+        </div>
+      </div>
+
       {shop ? (
         <OrderList 
           shopId={shop.id} 
@@ -50,10 +70,12 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           availableCouriers={couriers} 
         />
       ) : (
-        <div className="rounded-2xl bg-white p-8 text-center ring-1 ring-slate-200">
-          <h2 className="font-bold">Connect a Shopify store</h2>
-          <p className="mt-1 text-sm text-slate-500">Install the app from Shopify to bring real orders into Dispatch.</p>
-          <Link href="/settings" className="mt-4 inline-block rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Connect Shopify</Link>
+        <div className="rounded-lg bg-white p-8 text-center border border-slate-200 shadow-2xs">
+          <h2 className="font-semibold text-sm text-slate-900">Connect a Shopify store</h2>
+          <p className="mt-1 text-xs text-slate-500">Install the app from Shopify to bring real orders into Dispatch.</p>
+          <Link href="/settings" className="mt-3 inline-block rounded-md bg-slate-900 px-3.5 py-2 text-xs font-medium text-white shadow-2xs hover:bg-slate-800">
+            Connect Shopify
+          </Link>
         </div>
       )}
     </AppShell>
