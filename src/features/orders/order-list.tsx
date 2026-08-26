@@ -22,7 +22,8 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  ExternalLink
+  ExternalLink,
+  MapPin
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { money, cn } from "@/lib/utils";
@@ -30,9 +31,9 @@ import { createClient } from "@/lib/supabase/client";
 import { 
   FulfillmentBadge, 
   PaymentBadge, 
-  DispatchBadge,
-  StatusBadge
+  DispatchBadge
 } from "@/components/ui/status-badge";
+import type { PickupLocation } from "@/types/domain";
 
 type LineItem = {
   id: string;
@@ -195,7 +196,14 @@ export function OrderList({
   const [selectedCouriers, setSelectedCouriers] = useState<Record<string, string>>({});
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null);
 
+  // Pickup Locations Cache State
+  const [courierPickupMap, setCourierPickupMap] = useState<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>>({});
+
   // Modals & Sheets
+  const [singleDispatchOrder, setSingleDispatchOrder] = useState<Order | null>(null);
+  const [singleDispatchCourierId, setSingleDispatchCourierId] = useState<string>("");
+  const [singleDispatchPickupLocationId, setSingleDispatchPickupLocationId] = useState<string>("");
+
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [showSkipModal, setShowSkipModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -203,6 +211,7 @@ export function OrderList({
   const [skipReason, setSkipReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
   const [bulkCourierId, setBulkCourierId] = useState<string>("");
+  const [bulkPickupLocationId, setBulkPickupLocationId] = useState<string>("");
   const [batchProcessing, setBatchProcessing] = useState(false);
   const [bulkResults, setBulkResults] = useState<{ 
     title: string;
@@ -259,6 +268,19 @@ export function OrderList({
       if (res.ok) {
         const body = await res.json();
         setSavedFilters(body.data || []);
+      }
+    } catch {
+      // Non-blocking
+    }
+  }, [shopId]);
+
+  // Load Courier Pickup Locations for this shop
+  const loadCourierPickupLocations = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/shops/${shopId}/pickup-locations`);
+      if (res.ok) {
+        const body = await res.json();
+        setCourierPickupMap(body.data || {});
       }
     } catch {
       // Non-blocking
