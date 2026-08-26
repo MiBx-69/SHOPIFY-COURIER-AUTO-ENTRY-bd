@@ -1,6 +1,447 @@
-node_modules
-.next
-.env*
+# ============================================================
+# SHOPIFY COURIER APP — PROFESSIONAL GITIGNORE
+# ============================================================
+
+# ------------------------------------------------------------
+# Environment & Secrets
+# ------------------------------------------------------------
+
+.env
+.env.*
 !.env.example
-coverage
-supabase/.temp
+!.env.template
+
+# Local secret/config files
+*.secret
+*.secrets
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Secret/config backups
+.env.backup
+.env.bak
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+
+# ------------------------------------------------------------
+# Supabase
+# ------------------------------------------------------------
+
+# Supabase local state
+.supabase/
+
+# Supabase generated/local files
+supabase/.branches/
+supabase/.temp/
+
+# Local Supabase database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Supabase dumps/backups
+supabase-backup/
+supabase-backups/
+*.dump
+*.sql.gz
+
+
+# ------------------------------------------------------------
+# Shopify
+# ------------------------------------------------------------
+
+# Shopify CLI local state
+.shopify/
+
+# Shopify app local configuration
+shopify.local.toml
+
+# Local Shopify credentials/config
+shopify-secrets/
+shopify-credentials/
+shopify-app-credentials.*
+
+
+# ------------------------------------------------------------
+# Courier Credentials / Local Integrations
+# ------------------------------------------------------------
+
+# Never commit merchant-specific courier configuration
+courier-secrets/
+courier-credentials/
+redx-secrets/
+pathao-secrets/
+steadfast-secrets/
+
+# Local courier test configuration
+courier.local.*
+redx.local.*
+pathao.local.*
+steadfast.local.*
+
+
+# ------------------------------------------------------------
+# Node.js
+# ------------------------------------------------------------
+
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/
+.yarn-cache/
+
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+*.tgz
+
+
+# ------------------------------------------------------------
+# Next.js
+# ------------------------------------------------------------
+
+.next/
+out/
+.vercel/
+
+# Next.js build/debug output
+next-env.d.ts
+
+
+# ------------------------------------------------------------
+# Build / Distribution
+# ------------------------------------------------------------
+
+dist/
+build/
+release/
+coverage/
+.nyc_output/
+
+*.tsbuildinfo
+
+
+# ------------------------------------------------------------
+# Runtime / Temporary Files
+# ------------------------------------------------------------
+
+tmp/
+temp/
+.cache/
+.parcel-cache/
+.turbo/
+.eslintcache/
+
+*.tmp
+*.temp
+*.bak
+*.backup
+*.old
+*.swp
+*.swo
+
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+
+logs/
+*.log
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Vercel logs
+.vercel/
+
+
+# ------------------------------------------------------------
+# Testing
+# ------------------------------------------------------------
+
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+blob-report/
+
+# Local test artifacts
+test-output/
+test-results-local/
+
+# Test secrets / temporary integration scripts
+test-secrets/
+test-credentials/
+test-data/
+test-output/
+
+# Ignore local one-off integration/debug scripts
+test-sync.ts
+test-shopify.ts
+test-courier.ts
+debug-sync.ts
+debug-shopify.ts
+debug-courier.ts
+
+
+# ------------------------------------------------------------
+# Local Data / Exports
+# ------------------------------------------------------------
+
+data/
+local-data/
+exports/
+imports/
+backups/
+
+*.csv
+*.xlsx
+*.xls
+*.jsonl
+
+# Exception: keep intentional project JSON files
+!package.json
+!tsconfig.json
+!next.config.json
+!vercel.json
+
+
+# ------------------------------------------------------------
+# Generated Files
+# ------------------------------------------------------------
+
+generated/
+generated-files/
+artifacts/
+output/
+
+*.generated.*
+*.gen.*
+
+
+# ------------------------------------------------------------
+# OS Files
+# ------------------------------------------------------------
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+
+# Windows installer leftovers
+*.msi
+*.msix
+*.exe
+
+# Linux
+*~
+
+
+# ------------------------------------------------------------
+# IDE / Editors
+# ------------------------------------------------------------
+
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+
+# Sublime
+*.sublime-workspace
+*.sublime-project
+
+# VS Code local history
+.history/
+
+
+# ------------------------------------------------------------
+# TypeScript / JavaScript Tooling
+# ------------------------------------------------------------
+
+.eslintcache
+.stylelintcache
+.prettiercache
+
+# Storybook
+storybook-static/
+
+
+# ------------------------------------------------------------
+# Docker
+# ------------------------------------------------------------
+
+docker-compose.override.yml
+docker-compose.local.yml
+
+# Local Docker secrets
+docker-secrets/
+*.docker-secret
+
+
+# ------------------------------------------------------------
+# Python / Scripts
+# ------------------------------------------------------------
+
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Python environment files
+Pipfile.lock
+
+
+# ------------------------------------------------------------
+# Generated Documentation / Reports
+# ------------------------------------------------------------
+
+reports/
+*.report
+*.html.tmp
+
+
+# ------------------------------------------------------------
+# Security / Certificates
+# ------------------------------------------------------------
+
+certificates/
+certs/
+private/
+private-keys/
+
+# NEVER commit:
+# *.pem
+# *.key
+# *.p12
+# *.pfx
+
+
+# ------------------------------------------------------------
+# Local AI / Coding Agent Files
+# ------------------------------------------------------------
+
+# Local agent state
+.codex/
+.antigravity/
+.cursor/
+.claude/
+
+# Local AI context/cache
+.ai/
+.ai-cache/
+.agent/
+.agent-cache/
+
+
+# ------------------------------------------------------------
+# Local MCP / Connector Configuration
+# ------------------------------------------------------------
+
+.mcp/
+mcp.local.*
+mcp-config.local.*
+
+
+# ------------------------------------------------------------
+# Deployment / Infrastructure Secrets
+# ------------------------------------------------------------
+
+terraform.tfstate
+terraform.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+Pulumi.dev.yaml
+Pulumi.local.yaml
+
+serverless.local.yml
+
+
+# ------------------------------------------------------------
+# Local Configuration
+# ------------------------------------------------------------
+
+config.local.*
+configuration.local.*
+settings.local.*
+local.config.*
+local.settings.*
+
+
+# ------------------------------------------------------------
+# Database / Migration Temporary Files
+# ------------------------------------------------------------
+
+*.sql.bak
+*.sql.tmp
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+
+
+# ------------------------------------------------------------
+# Uploaded / User Generated Files
+# ------------------------------------------------------------
+
+uploads/
+user-uploads/
+storage/
+public/uploads/
+
+
+# ------------------------------------------------------------
+# Security Scan / Secret Detection Output
+# ------------------------------------------------------------
+
+secret-scan-results/
+gitleaks-report.*
+trufflehog-report.*
+security-report.*
+
+
+# ------------------------------------------------------------
+# Miscellaneous
+# ------------------------------------------------------------
+
+*.orig
+*.rej
+*.patch
+*.pid
+*.pid.lock
+
+.DS_Store
+Thumbs.db
+
+# Local machine metadata
+.machine/
+.local/

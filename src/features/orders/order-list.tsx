@@ -11,13 +11,16 @@ import {
   ChevronRight, 
   X,
   Clock,
-  CheckCircle2,
-  Copy,
-  Check
+  CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { money, cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
+import { 
+  FulfillmentBadge, 
+  PaymentBadge, 
+  DispatchBadge 
+} from "@/components/ui/status-badge";
 
 type LineItem = {
   id: string;
@@ -307,7 +310,7 @@ export function OrderList({
                   key={f.id}
                   onClick={() => handleFilterChange(f.id)}
                   className={cn(
-                    "h-6.5 px-2.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap",
+                    "h-6.5 px-2.5 rounded-full text-[11px] font-medium transition-colors whitespace-nowrap",
                     active
                       ? "bg-slate-900 text-white font-semibold shadow-2xs"
                       : "bg-slate-100/80 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
@@ -429,8 +432,12 @@ export function OrderList({
                 const courierName = dispatchRecord?.courier_configs?.couriers?.display_name || dispatchRecord?.courier_configs?.couriers?.provider;
                 const totalItemCount = order.order_line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0;
                 const isDispatched = order.dispatch_status === "dispatched";
-                const isFailed = order.dispatch_status === "failed";
                 const isCancelled = Boolean(order.cancelled_at);
+
+                // Fulfillment status with cancellation priority
+                const fulfillmentStatus = isCancelled 
+                  ? "CANCELLED" 
+                  : (order.fulfillment_status || "UNFULFILLED");
 
                 return (
                   <tr 
@@ -487,39 +494,14 @@ export function OrderList({
                       {money(order.total_minor, order.currency)}
                     </td>
 
-                    {/* Payment */}
+                    {/* Payment Status Badge */}
                     <td className="px-2.5 py-1.5 whitespace-nowrap">
-                      <span className={cn(
-                        "inline-flex items-center text-[11px] font-medium",
-                        order.financial_status === "PAID" ? "text-emerald-700" :
-                        order.financial_status === "PENDING" ? "text-amber-700" :
-                        order.financial_status === "REFUNDED" ? "text-slate-500 line-through" :
-                        "text-slate-600"
-                      )}>
-                        <span className={cn(
-                          "size-1.5 rounded-full mr-1.5 shrink-0",
-                          order.financial_status === "PAID" ? "bg-emerald-500" :
-                          order.financial_status === "PENDING" ? "bg-amber-500" :
-                          "bg-slate-400"
-                        )} />
-                        {order.financial_status === "PAID" ? "Paid" :
-                         order.financial_status === "PENDING" ? "COD" :
-                         order.financial_status || "—"}
-                      </span>
+                      <PaymentBadge status={order.financial_status} />
                     </td>
 
-                    {/* Fulfillment */}
+                    {/* Fulfillment Status Badge */}
                     <td className="px-2.5 py-1.5 whitespace-nowrap">
-                      <span className={cn(
-                        "text-[11px] font-medium",
-                        order.fulfillment_status === "FULFILLED" ? "text-emerald-700" :
-                        order.fulfillment_status === "PARTIALLY_FULFILLED" ? "text-blue-700" :
-                        "text-slate-600"
-                      )}>
-                        {order.fulfillment_status === "FULFILLED" ? "Fulfilled" :
-                         order.fulfillment_status === "PARTIALLY_FULFILLED" ? "Partial" :
-                         "Unfulfilled"}
-                      </span>
+                      <FulfillmentBadge status={fulfillmentStatus} />
                     </td>
 
                     {/* Courier */}
@@ -531,41 +513,14 @@ export function OrderList({
                       )}
                     </td>
 
-                    {/* Dispatch Status & Tracking */}
+                    {/* Dispatch Status & Tracking Badge */}
                     <td className="px-2.5 py-1.5 whitespace-nowrap">
-                      {isDispatched ? (
-                        <div className="flex items-center gap-1">
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                            Dispatched
-                          </span>
-                          {tracking && (
-                            <button
-                              onClick={() => copyTrackingToClipboard(tracking)}
-                              title="Click to copy tracking ID"
-                              className="group flex items-center gap-1 font-mono text-[10px] text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
-                            >
-                              <span>{tracking}</span>
-                              {copiedTracking === tracking ? (
-                                <Check size={10} className="text-emerald-600" />
-                              ) : (
-                                <Copy size={10} className="opacity-40 group-hover:opacity-100" />
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      ) : isFailed ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-red-50 text-red-700 border border-red-200/60">
-                          Failed
-                        </span>
-                      ) : isCancelled ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-500">
-                          Cancelled
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-slate-500">
-                          Pending
-                        </span>
-                      )}
+                      <DispatchBadge 
+                        status={order.dispatch_status} 
+                        tracking={tracking} 
+                        copied={copiedTracking === tracking}
+                        onCopy={copyTrackingToClipboard}
+                      />
                     </td>
 
                     {/* Date */}
@@ -635,9 +590,13 @@ export function OrderList({
             const isSelected = selectedSet.has(order.id);
             const dispatchRecord = order.dispatches?.[0];
             const tracking = dispatchRecord?.tracking_id;
-            const courierName = dispatchRecord?.courier_configs?.couriers?.display_name || dispatchRecord?.courier_configs?.couriers?.provider;
             const totalItemCount = order.order_line_items?.reduce((sum, item) => sum + (item.quantity || 1), 0) || 0;
             const isDispatched = order.dispatch_status === "dispatched";
+            const isCancelled = Boolean(order.cancelled_at);
+
+            const fulfillmentStatus = isCancelled 
+              ? "CANCELLED" 
+              : (order.fulfillment_status || "UNFULFILLED");
 
             return (
               <div 
@@ -682,46 +641,37 @@ export function OrderList({
                   </div>
 
                   {/* Status & Date row */}
-                  <div className="flex items-center justify-between gap-1 text-[10px] text-slate-500 mt-1">
+                  <div className="flex items-center justify-between gap-1 text-[10px] text-slate-500 mt-1.5 flex-wrap">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className={cn(
-                        "font-medium",
-                        order.fulfillment_status === "FULFILLED" ? "text-emerald-700" : "text-amber-700"
-                      )}>
-                        {order.fulfillment_status === "FULFILLED" ? "Fulfilled" : "Unfulfilled"}
-                      </span>
-                      <span className="text-slate-300">·</span>
-                      <span className={cn(
-                        "font-medium",
-                        order.financial_status === "PAID" ? "text-emerald-700" : "text-amber-700"
-                      )}>
-                        {order.financial_status === "PAID" ? "Paid" : "COD"}
-                      </span>
-                      <span className="text-slate-300">·</span>
-                      <span>{fmtShortDate(order.shopify_updated_at)}</span>
+                      <FulfillmentBadge size="sm" short status={fulfillmentStatus} />
+                      <PaymentBadge size="sm" short status={order.financial_status} />
+                      {isDispatched && (
+                        <DispatchBadge 
+                          size="sm" 
+                          status={order.dispatch_status} 
+                          tracking={tracking} 
+                          copied={copiedTracking === tracking}
+                          onCopy={copyTrackingToClipboard}
+                        />
+                      )}
+                      <span className="text-slate-400">{fmtShortDate(order.shopify_updated_at)}</span>
                     </div>
 
-                    {/* Mobile Action / Status */}
-                    <div>
-                      {isDispatched ? (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200/60">
-                          {tracking || "Dispatched"}
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => dispatchSingle(order.id)}
-                          disabled={dispatchingId === order.id}
-                          className="h-6 px-2 rounded bg-slate-900 text-white text-[10px] font-medium inline-flex items-center gap-1 disabled:opacity-50"
-                        >
-                          {dispatchingId === order.id ? (
-                            <RefreshCw size={10} className="animate-spin" />
-                          ) : (
-                            <Truck size={10} />
-                          )}
-                          Dispatch
-                        </button>
-                      )}
-                    </div>
+                    {/* Mobile Action */}
+                    {!isDispatched && !isCancelled && (
+                      <button
+                        onClick={() => dispatchSingle(order.id)}
+                        disabled={dispatchingId === order.id}
+                        className="h-6 px-2 rounded bg-slate-900 text-white text-[10px] font-medium inline-flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {dispatchingId === order.id ? (
+                          <RefreshCw size={10} className="animate-spin" />
+                        ) : (
+                          <Truck size={10} />
+                        )}
+                        Dispatch
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
