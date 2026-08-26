@@ -1,0 +1,10 @@
+project_id = "shopify-courier-dispatch"
+
+[functions.dispatch-order]
+verify_jwt = true
+[functions.shopify-webhook]
+verify_jwt = false
+[functions.sync-shop]
+verify_jwt = true
+[functions.configure-courier]
+verify_jwt = true

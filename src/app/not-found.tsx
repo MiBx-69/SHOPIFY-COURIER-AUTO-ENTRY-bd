@@ -1,0 +1,2 @@
+import Link from "next/link";
+export default function NotFound() { return <main className="mx-auto flex min-h-dvh max-w-md items-center p-5"><section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200"><h1 className="text-xl font-bold">Not found</h1><p className="mt-2 text-sm text-slate-600">This resource is unavailable or you do not have access to it.</p><Link href="/orders" className="mt-4 inline-block font-semibold">Back to orders</Link></section></main>; }

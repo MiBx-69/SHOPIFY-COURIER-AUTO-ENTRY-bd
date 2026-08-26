@@ -1,0 +1,3 @@
+"use client";
+import { useEffect } from "react";
+export default function Error({ reset }: { error: Error; reset: () => void }) { useEffect(() => {}, []); return <main className="mx-auto flex min-h-dvh max-w-md items-center p-5"><section className="rounded-2xl bg-white p-6 ring-1 ring-slate-200"><h1 className="text-xl font-bold">Something needs attention</h1><p className="mt-2 text-sm text-slate-600">The operation did not complete. No dispatch was assumed successful.</p><button onClick={reset} className="mt-4 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white">Try again</button></section></main>; }

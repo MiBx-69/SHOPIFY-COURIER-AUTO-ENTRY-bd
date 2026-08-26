@@ -1,0 +1,3 @@
+import { NextRequest, NextResponse } from "next/server";
+import { currentUser, apiError } from "@/lib/api/auth";
+export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) { try { const { id } = await params; const { supabase } = await currentUser(); const { data, error } = await supabase.from("orders").select("*,order_line_items(*),dispatches(*,courier_configs(*,couriers(*)),courier_shipments(*,courier_tracking_events(*)),order_internal_notes(*)").eq("id", id).single(); if (error || !data) return NextResponse.json({ error: "Order not found" }, { status: 404 }); return NextResponse.json({ data }); } catch (error) { return apiError(error); } }
