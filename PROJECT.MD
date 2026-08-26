@@ -3196,6 +3196,31 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
 - **Inline Error Badges**: When an order fails, the actual sanitized courier error message (`safe_error_message`) is rendered inline in both the desktop table and mobile order cards with tooltip support.
 - **Safe Structured Server Logging**: Structured server logs trace `[DISPATCH START]`, `[DISPATCH SUCCESS]`, and `[DISPATCH FAILED]` with attempt IDs while strictly redacting secrets and tokens.
 
+---
+
+# 96. Atomic Dispatch Claim & Stale Lock Recovery System
+
+### 1. Robust Atomic Claiming (`claim_dispatch`)
+- **Row-Level Atomic Locking**: `SELECT * FROM orders WHERE id = p_order_id FOR UPDATE` serializes concurrent claims.
+- **Strict Enum Validation**:
+  - `status`: Uses valid `public.dispatch_status` (`'dispatching'`, `'dispatched'`, `'failed'`, `'cancelled'`).
+  - `phase`: Uses valid `public.dispatch_phase` (`'created'`, `'courier_created'`, `'completed'`, `'failed'`).
+- **State Transition Matrix**:
+  - `not_dispatched` / `failed` / `cancelled` -> `dispatching` -> `dispatched` or `failed`
+  - Prevents race conditions and double-dispatching across independent browser tabs/sessions.
+
+### 2. Automatic Stale Lock Recovery
+- If an order is marked `dispatching` but was abandoned or interrupted (> 5 minutes threshold), subsequent dispatch claims automatically recover and acquire the lock with a fresh `idempotency_key`.
+- Active concurrent claims (< 5 minutes) are rejected cleanly with HTTP 409: `"Dispatch is already in progress for this order."`.
+
+### 3. Courier API Compatibility & Validation
+- **REDX Provider**:
+  - Dynamically resolves `delivery_area_id` via post code lookup (`/areas?post_code=...`).
+  - Provides required `customer_address`, `delivery_area`, `delivery_area_id`, and `value` (declared parcel value).
+  - Verified live connection against REDX API (`openapi.redx.com.bd`).
+- **Error Containment**: Top-level `try ... catch` in `DispatchService.execute` guarantees `dispatches.status = 'failed'` and lock release on all unhandled failures.
+
+
 
 
 
