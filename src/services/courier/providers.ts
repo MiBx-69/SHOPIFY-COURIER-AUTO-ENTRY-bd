@@ -176,13 +176,37 @@ export class RedxProvider implements CourierProvider {
       const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
       const weight = Number(c.defaultWeightKg || 0.5) || 0.5;
 
+      // Resolve delivery_area_id from REDX area lookup
+      let areaId: number = 1;
+      let areaName: string = p.area || p.city || "Dhaka";
+      if (p.postalCode) {
+        try {
+          const { response: areaRes, data: areaData } = await courierFetch(`${this.baseUrl(c)}/areas?post_code=${encodeURIComponent(p.postalCode)}`, {
+            headers: { "API-ACCESS-TOKEN": token }
+          });
+          if (areaRes.ok) {
+            const areaObj = areaData as { areas?: Array<{ id: number; name: string }> };
+            if (areaObj.areas && areaObj.areas.length > 0) {
+              const matched = areaObj.areas.find((a) => p.area && a.name.toLowerCase().includes(p.area.toLowerCase())) || areaObj.areas[0];
+              areaId = matched.id;
+              areaName = matched.name;
+            }
+          }
+        } catch {
+          // fallback to defaults
+        }
+      }
+
       const payload: Record<string, unknown> = {
         customer_name: p.customerName || "Customer",
         customer_phone: phone,
-        delivery_area: p.area || p.city || "Dhaka",
+        customer_address: address,
         delivery_address: address,
+        delivery_area: areaName,
+        delivery_area_id: areaId,
         merchant_invoice_id: String(p.orderNumber || p.orderId),
         cash_collection_amount: codAmount,
+        value: codAmount > 0 ? codAmount : 500,
         parcel_weight: weight,
         instruction: p.notes || ""
       };
@@ -199,7 +223,7 @@ export class RedxProvider implements CourierProvider {
       });
       const d = data as Record<string, unknown>;
       const tracking = String(d.tracking_id || d.trackingId || d.parcel_id || "");
-      if (response.ok && tracking) {
+      if ((response.status === 200 || response.status === 201) && tracking) {
         return { outcome: "success", trackingId: tracking, courierReference: String(d.parcel_id || tracking), metadata: { status: response.status } };
       }
 
