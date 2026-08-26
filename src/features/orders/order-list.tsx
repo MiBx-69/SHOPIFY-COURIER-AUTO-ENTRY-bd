@@ -1252,6 +1252,7 @@ export function OrderList({
             const isCancelled = Boolean(order.cancelled_at);
             const isSkipped = order.is_skipped;
             const isFailed = order.dispatch_status === "failed";
+            const isDispatching = order.dispatch_status === "dispatching" || actionLoadingId === order.id;
 
             const fulfillmentStatus = isCancelled 
               ? "CANCELLED" 
