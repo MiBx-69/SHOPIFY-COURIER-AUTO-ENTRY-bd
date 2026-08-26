@@ -3047,3 +3047,46 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
 ### 9. Filter Counts & URL State Synchronization
 - Server-side parallel count endpoint (`/api/orders/counts`) providing accurate real-time numbers for all tabs.
 - Active tabs, search, and date filters synchronized to URL query parameters (`/orders?tab=ready&date=today`).
+
+---
+
+# 92. Courier Pickup Location System & Dispatch Flow
+
+### 1. Courier Pickup Location Architecture
+- **Origin Synchronization**: Pickup locations are retrieved dynamically from official courier accounts (Pathao Merchant Stores `GET /aladdin/api/v1/stores`, REDX Pickup Stores `GET /pickup-stores`, Steadfast registered hubs).
+- **Courier-Specific Identifier Translation**:
+  - **Pathao**: Translates selected application pickup location to integer `store_id` required by Pathao Order API.
+  - **REDX**: Translates selected pickup location to `pickup_store_id` (or store reference) required by REDX Parcel API.
+  - **Steadfast**: Translates selected location into registered hub and merchant dispatch metadata.
+- **Tenant-Isolated Caching**: Synchronized locations are cached in Supabase (`saved_filters` with RLS) under tenant isolation and refreshed on demand.
+
+### 2. Settings & Default Pickup Location Management
+- **Settings → Couriers → Pickup Locations**:
+  - Connected courier cards display active pickup locations with Name, Address, Contact Phone, and Status indicators.
+  - **Refresh Locations**: Triggers live sync with courier API (`POST /api/couriers/[id]/pickup-locations/sync`).
+  - **Smart Default Assignment**: Merchants configure a default pickup location per courier (`POST /api/couriers/[id]/pickup-locations/default`). When automatic courier or manual selection chooses that provider, the designated default is pre-selected.
+
+### 3. Pre-Dispatch Confirmation & Selection Workflow
+- **Single Dispatch Modal**:
+  - Clicking `[ Dispatch ]` opens a compact modal / mobile sheet.
+  - Displays Order Number, Customer, Phone, Items count, and Total COD.
+  - Allows selecting the Courier (Automatic or specific provider) and the Pickup Location.
+  - Pre-selects the courier's default pickup location and provides an address preview.
+  - Validates that the courier has an active pickup location before enabling dispatch.
+- **Bulk Dispatch Modal**:
+  - Clicking `[ Dispatch Selected ]` opens the batch dispatch confirmation dialog.
+  - Displays batch summary: Ready count vs Needs Attention count, Estimated total COD sum.
+  - Allows selecting Courier and **One unified Pickup Location** that applies to all orders in that batch.
+
+### 4. Automatic Courier + Pickup Location Resolution
+- When automatic priority selects a courier, the system automatically resolves that courier's active pickup locations and defaults to the configured default location.
+- If the courier has no configured pickup locations, dispatch is safely blocked with a descriptive alert: `"No pickup location is configured for [Courier]."`
+
+### 5. Historical Audit & Permanent Location Tracking
+- Every created courier shipment permanently records the origination details in `order_events`, `dispatches`, and `dispatch_attempts`:
+  - `pickup_location_id`, `pickup_location_name`, `pickup_address`, `pickup_phone`.
+- Historical records are preserved even if courier stores are later renamed or modified.
+
+### 6. Order Details Display
+- The Order Details page (`/orders/[id]`) renders the courier name, tracking number, pickup location name, and pickup address in the Dispatch & Fulfillment card.
+
