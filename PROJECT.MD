@@ -2973,3 +2973,10 @@ Prioritize:
 10. Visual polish
 
 Never sacrifice tenant isolation or dispatch correctness for UI convenience.
+
+## 36. Updates (Aug 2026)
+- Shopify Sync has been repaired to perform initial reconciliation properly.
+- Courier Credentials are now managed completely within the UI and securely encrypted into courier_secrets without requiring environment variables.
+- Dispatch logic correctly processes utomatic_courier preference and priority drag-and-drop ordering.
+- Shopify App Bridge is conditionally rendered only in embedded mode.
+- Idempotency locks are fully implemented for Shopify dispatch.

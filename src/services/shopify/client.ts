@@ -23,6 +23,46 @@ export async function updateShopifyDispatchMetafields(shopId: string, orderGid: 
   if (result.metafieldsSet.userErrors.length) throw new Error(result.metafieldsSet.userErrors[0].message);
 }
 
+export async function createShopifyFulfillment(shopId: string, orderGid: string, trackingInfo: { company: string; number: string; url?: string }) {
+  // First, fetch the fulfillment order IDs for the given order
+  const orderData = await shopifyGraphql<{ order: { fulfillmentOrders: { nodes: Array<{ id: string, status: string }> } } }>(
+    shopId,
+    `query getFulfillmentOrders($id: ID!) { order(id: $id) { fulfillmentOrders(first: 10) { nodes { id status } } } }`,
+    { id: orderGid }
+  );
+
+  const openFulfillmentOrders = orderData.order.fulfillmentOrders.nodes.filter(fo => fo.status === "OPEN" || fo.status === "IN_PROGRESS");
+  if (openFulfillmentOrders.length === 0) {
+    return; // Nothing to fulfill
+  }
+
+  // Create fulfillment for the first open fulfillment order
+  const fulfillmentOrderId = openFulfillmentOrders[0].id;
+  const result = await shopifyGraphql<{ fulfillmentCreateV2: { userErrors: Array<{ message: string }> } }>(
+    shopId,
+    `mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
+      fulfillmentCreateV2(fulfillment: $fulfillment) {
+        userErrors { message }
+      }
+    }`,
+    {
+      fulfillment: {
+        lineItemsByFulfillmentOrder: [{ fulfillmentOrderId }],
+        notifyCustomer: true,
+        trackingInfo: {
+          company: trackingInfo.company,
+          number: trackingInfo.number,
+          url: trackingInfo.url || ""
+        }
+      }
+    }
+  );
+
+  if (result.fulfillmentCreateV2?.userErrors?.length) {
+    throw new Error(result.fulfillmentCreateV2.userErrors[0].message);
+  }
+}
+
 export async function registerShopifyWebhooks(shopId: string) {
   const callback = `${serverEnv().SHOPIFY_APP_URL}/api/webhooks/shopify`;
   const topics = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED", "ORDERS_FULFILLED", "FULFILLMENTS_CREATE", "FULFILLMENTS_UPDATE", "PRODUCTS_UPDATE", "PRODUCTS_DELETE", "APP_UNINSTALLED"];

@@ -44,7 +44,17 @@ const FILTERS = [
   { id: "cancelled", label: "Cancelled" }
 ];
 
-export function OrderList({ shopId, initialStatus = "all" }: { shopId: string; initialStatus?: string }) {
+export function OrderList({ 
+  shopId, 
+  initialStatus = "all",
+  automaticCourier = true,
+  availableCouriers = []
+}: { 
+  shopId: string; 
+  initialStatus?: string;
+  automaticCourier?: boolean;
+  availableCouriers?: Array<{ id: string; name: string }>;
+}) {
   const [orders, setOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState(initialStatus);
@@ -102,14 +112,14 @@ export function OrderList({ shopId, initialStatus = "all" }: { shopId: string; i
     };
   }, [shopId]);
 
-  async function dispatch(orderId: string) {
+  async function dispatch(orderId: string, courierConfigId?: string) {
     if (!window.confirm("Confirm dispatch? A courier shipment will be created.")) return;
     setNotice("Dispatching…");
     try {
       const response = await fetch("/api/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, idempotencyKey: crypto.randomUUID() })
+        body: JSON.stringify({ orderId, courierConfigId, idempotencyKey: crypto.randomUUID() })
       });
       const body = await response.json();
       setNotice(response.ok ? `Dispatched${body.data?.tracking_id ? ` · ${body.data.tracking_id}` : ""}` : body.error || "Dispatch could not be completed");
@@ -280,13 +290,34 @@ export function OrderList({ shopId, initialStatus = "all" }: { shopId: string; i
                 </div>
 
                 {order.dispatch_status !== "dispatched" && order.dispatch_status !== "cancelled" && (
-                  <Button
-                    onClick={() => dispatch(order.id)}
-                    className="mt-4 flex w-full items-center justify-center gap-2"
-                  >
-                    <Truck size={17} />
-                    Dispatch Now
-                  </Button>
+                  <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    {!automaticCourier && availableCouriers.length > 0 && (
+                      <select 
+                        id={`courier-select-${order.id}`}
+                        className="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm sm:max-w-48"
+                      >
+                        <option value="">Select courier</option>
+                        {availableCouriers.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    <Button
+                      onClick={() => {
+                        const selectElement = document.getElementById(`courier-select-${order.id}`) as HTMLSelectElement | null;
+                        const configId = selectElement?.value;
+                        if (!automaticCourier && !configId) {
+                          alert("Please select a courier first.");
+                          return;
+                        }
+                        dispatch(order.id, configId);
+                      }}
+                      className="flex h-10 w-full items-center justify-center gap-2"
+                    >
+                      <Truck size={17} />
+                      Dispatch Now
+                    </Button>
+                  </div>
                 )}
               </article>
             );

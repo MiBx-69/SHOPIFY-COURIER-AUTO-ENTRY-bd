@@ -2,7 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/crypto";
 import { courierRegistry } from "@/services/courier/registry";
 import { selectCourier } from "@/services/courier/selector";
-import { updateShopifyDispatchMetafields } from "@/services/shopify/client";
+import { updateShopifyDispatchMetafields, createShopifyFulfillment } from "@/services/shopify/client";
 import type { NormalizedShipment } from "@/types/domain";
 
 function address(value: Record<string, string>) { return [value.address1, value.address2, value.area, value.city, value.province, value.zip, value.country].filter(Boolean).join(", "); }
@@ -34,7 +34,13 @@ export class DispatchService {
     await admin.from("courier_shipments").insert({ dispatch_id: dispatch.id, shop_id: dispatch.shop_id, provider: selected.provider, tracking_id: result.trackingId, courier_reference: result.courierReference, status: "created" });
     await admin.from("dispatches").update({ courier_config_id: selected.id, status: "dispatched", phase: "courier_created", tracking_id: result.trackingId, courier_reference: result.courierReference, courier_status: "created", dispatched_at: new Date().toISOString() }).eq("id", dispatch.id);
     await admin.from("orders").update({ dispatch_status: "dispatched" }).eq("id", dispatch.order_id);
-    try { await updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), { courier: selected.provider, trackingId: result.trackingId, reference: result.courierReference, dispatchedAt: new Date().toISOString() }); await admin.from("dispatches").update({ phase: "completed", shopify_updated_at: new Date().toISOString() }).eq("id", dispatch.id); } catch { await admin.from("dispatches").update({ phase: "shopify_update_pending", safe_error_message: "Courier shipment created; Shopify update requires attention." }).eq("id", dispatch.id); }
+    try { 
+      await updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), { courier: selected.provider, trackingId: result.trackingId, reference: result.courierReference, dispatchedAt: new Date().toISOString() }); 
+      await createShopifyFulfillment(dispatch.shop_id, String(order.shopify_order_gid), { company: selected.provider, number: result.trackingId });
+      await admin.from("dispatches").update({ phase: "completed", shopify_updated_at: new Date().toISOString() }).eq("id", dispatch.id); 
+    } catch { 
+      await admin.from("dispatches").update({ phase: "shopify_update_pending", safe_error_message: "Courier shipment created; Shopify update requires attention." }).eq("id", dispatch.id); 
+    }
     return admin.from("dispatches").select().eq("id", dispatch.id).single();
   }
   private async fail(dispatch: { id: string; order_id: string }, message: string) { const admin = createAdminClient(); await admin.from("dispatches").update({ status: "failed", phase: "failed", safe_error_message: message }).eq("id", dispatch.id); await admin.from("orders").update({ dispatch_status: "failed" }).eq("id", dispatch.order_id); return admin.from("dispatches").select().eq("id", dispatch.id).single(); }
