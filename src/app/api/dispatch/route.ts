@@ -16,11 +16,17 @@ export async function POST(request: NextRequest) {
     });
 
     if (error || !dispatch) {
+      const errMsg = error?.message || "Failed to claim order for dispatch";
+      console.warn(`[DISPATCH CLAIM REJECTED] order_id=${body.orderId} user_id=${user.id} error="${errMsg}"`);
+
+      const isConcurrent = errMsg.toLowerCase().includes("already in progress");
       return NextResponse.json({ 
         success: false,
-        error: "This order cannot be claimed for dispatch or is already being processed." 
-      }, { status: 409 });
+        error: isConcurrent ? "Dispatch is already in progress for this order." : errMsg
+      }, { status: isConcurrent ? 409 : 400 });
     }
+
+    console.info(`[DISPATCH CLAIM ACQUIRED] dispatch_id=${dispatch.id} order_id=${body.orderId} user_id=${user.id}`);
 
     const result = await new DispatchService().execute(
       dispatch.id,

@@ -1046,6 +1046,7 @@ export function OrderList({
                 const isCancelled = Boolean(order.cancelled_at);
                 const isSkipped = order.is_skipped;
                 const isFailed = order.dispatch_status === "failed";
+                const isDispatching = order.dispatch_status === "dispatching" || actionLoadingId === order.id;
 
                 const fulfillmentStatus = isCancelled 
                   ? "CANCELLED" 
@@ -1193,18 +1194,27 @@ export function OrderList({
 
                           <button
                             onClick={() => openSingleDispatchModal(order)}
-                            disabled={actionLoadingId === order.id}
+                            disabled={isDispatching}
                             className={cn(
-                              "h-6.5 px-2.5 rounded text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50 shadow-2xs cursor-pointer",
-                              isFailed ? "bg-amber-700 hover:bg-amber-600" : "bg-slate-900 hover:bg-slate-800"
+                              "h-6.5 px-2.5 rounded text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 shadow-2xs",
+                              isDispatching
+                                ? "bg-slate-400 cursor-not-allowed opacity-80"
+                                : isFailed
+                                ? "bg-amber-700 hover:bg-amber-600 cursor-pointer"
+                                : "bg-slate-900 hover:bg-slate-800 cursor-pointer"
                             )}
                           >
-                            {actionLoadingId === order.id ? (
-                              <RefreshCw size={11} className="animate-spin" />
+                            {isDispatching ? (
+                              <>
+                                <RefreshCw size={11} className="animate-spin" />
+                                <span>Dispatching…</span>
+                              </>
                             ) : (
-                              <Truck size={11} />
+                              <>
+                                <Truck size={11} />
+                                <span>{isFailed ? "Retry" : "Dispatch"}</span>
+                              </>
                             )}
-                            {isFailed ? "Retry" : "Dispatch"}
                           </button>
                         </div>
                       )}
