@@ -179,8 +179,7 @@ create table public.dispatches (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (order_id),
-  unique (shop_id, idempotency_key),
-  unique nulls not distinct (shop_id, tracking_id)
+  unique (shop_id, idempotency_key)
 );
 
 create table public.dispatch_attempts (
@@ -309,6 +308,7 @@ create index orders_phone_trgm_idx on public.orders using gin(customer_phone gin
 create index line_items_sku_idx on public.order_line_items(shop_id, sku);
 create index dispatches_shop_order_idx on public.dispatches(shop_id, order_id);
 create index dispatches_tracking_idx on public.dispatches(shop_id, tracking_id);
+create unique index dispatches_shop_tracking_unique_idx on public.dispatches(shop_id, tracking_id) where tracking_id is not null;
 create index webhook_received_idx on public.webhook_events(shop_id, received_at desc);
 create index audit_logs_shop_created_idx on public.audit_logs(shop_id, created_at desc);
 create index sync_jobs_shop_status_idx on public.sync_jobs(shop_id, status, created_at);
