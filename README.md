@@ -31,6 +31,8 @@ npm run test:rls
 npm run build
 ```
 
+For a database-level RLS test against a local Supabase stack, run `supabase test db`. The included `supabase/tests/tenant_isolation.sql` asserts RLS activation; extend it with real locally seeded User A/User B JWT fixtures before a production release.
+
 ## Deployment/security checklist
 
 - Never add a service-role key, Shopify access token, courier credential, or `ENCRYPTION_KEY` to `NEXT_PUBLIC_*` values.
