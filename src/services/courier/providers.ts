@@ -1,5 +1,5 @@
-import { courierFetch, requireFields, type CourierProvider } from "@/services/courier/provider";
-import type { CourierResult, NormalizedShipment } from "@/types/domain";
+import { courierFetch, requireFields, type CourierProvider, type CourierCredentials } from "@/services/courier/provider";
+import type { CourierResult, NormalizedShipment, PickupLocation } from "@/types/domain";
 
 function base(credentials: Record<string, string>, fallback?: string) {
   return (credentials.baseUrl || fallback || "").replace(/\/$/, "");
@@ -25,22 +25,66 @@ export class RedxProvider implements CourierProvider {
     if (!response.ok && response.status !== 400) throw new Error("REDX credentials were rejected");
   }
 
+  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+    this.validateConfig(c);
+    try {
+      const { response, data } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/pickup-stores`, {
+        headers: { "API-ACCESS-TOKEN": c.apiToken }
+      });
+      const d = data as { pickup_stores?: Array<Record<string, unknown>>; stores?: Array<Record<string, unknown>> };
+      const rawStores = d?.pickup_stores || d?.stores || [];
+
+      if (response.ok && Array.isArray(rawStores) && rawStores.length > 0) {
+        return rawStores.map((s) => ({
+          id: String(s.id || s.pickup_store_id || s.store_id),
+          courierLocationId: String(s.id || s.pickup_store_id || s.store_id),
+          name: String(s.name || s.store_name || "Main Warehouse"),
+          address: String(s.address || s.pickup_address || "Dhaka"),
+          phone: s.phone ? String(s.phone) : undefined,
+          city: s.city ? String(s.city) : undefined,
+          area: s.area ? String(s.area) : undefined,
+          isActive: s.status !== "inactive"
+        }));
+      }
+    } catch {
+      // Fallback below
+    }
+
+    // Default primary location if API returns empty
+    return [
+      {
+        id: "redx_default_hub",
+        courierLocationId: "redx_default_hub",
+        name: c.senderName ? `${c.senderName} Warehouse` : "Main Warehouse",
+        address: c.pickupAddress || "Registered Merchant Address",
+        phone: c.senderPhone || undefined,
+        isActive: true
+      }
+    ];
+  }
+
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
     try {
       this.validateConfig(c);
+      const payload: Record<string, unknown> = {
+        customer_name: p.customerName,
+        customer_phone: p.phone,
+        delivery_area: p.area || p.city || "",
+        delivery_address: p.fullAddress,
+        merchant_invoice_id: p.orderNumber,
+        cash_collection_amount: p.codAmount,
+        parcel_weight: c.defaultWeightKg || "0.5",
+        instruction: p.notes || ""
+      };
+
+      if (p.pickupLocationId && p.pickupLocationId !== "redx_default_hub") {
+        payload.pickup_store_id = isNaN(Number(p.pickupLocationId)) ? p.pickupLocationId : Number(p.pickupLocationId);
+      }
+
       const { response, data } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/parcel`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "API-ACCESS-TOKEN": c.apiToken, "Idempotency-Key": key },
-        body: JSON.stringify({
-          customer_name: p.customerName,
-          customer_phone: p.phone,
-          delivery_area: p.area || p.city || "",
-          delivery_address: p.fullAddress,
-          merchant_invoice_id: p.orderNumber,
-          cash_collection_amount: p.codAmount,
-          parcel_weight: c.defaultWeightKg || "0.5",
-          instruction: p.notes || ""
-        })
+        body: JSON.stringify(payload)
       });
       const d = data as Record<string, unknown>;
       const tracking = String(d.tracking_id || d.trackingId || d.parcel_id || "");
@@ -79,7 +123,7 @@ export class PathaoProvider implements CourierProvider {
   readonly name = "pathao" as const;
 
   validateConfig(c: Record<string, string>) {
-    requireFields(c, ["clientId", "clientSecret", "username", "password", "storeId"]);
+    requireFields(c, ["clientId", "clientSecret", "username", "password"]);
     if (!base(c, process.env.PATHAO_API_URL)) throw new Error("PATHAO_API_URL or credentials.baseUrl is required");
   }
 
@@ -105,15 +149,56 @@ export class PathaoProvider implements CourierProvider {
     await this.token(c);
   }
 
+  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+    this.validateConfig(c);
+    const token = await this.token(c);
+    const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/stores`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const d = data as { data?: { data?: Array<Record<string, unknown>> } | Array<Record<string, unknown>> };
+    const rawList = Array.isArray(d?.data) ? d.data : Array.isArray(d?.data?.data) ? d.data.data : [];
+
+    if (response.ok && rawList.length > 0) {
+      return rawList.map((s) => ({
+        id: String(s.store_id || s.id),
+        courierLocationId: String(s.store_id || s.id),
+        name: String(s.store_name || s.name || "Pathao Store"),
+        address: String(s.store_address || s.address || ""),
+        phone: s.store_phone ? String(s.store_phone) : undefined,
+        city: s.city_name ? String(s.city_name) : undefined,
+        area: s.zone_name ? String(s.zone_name) : undefined,
+        isActive: Boolean(s.is_active ?? true)
+      }));
+    }
+
+    if (c.storeId) {
+      return [
+        {
+          id: String(c.storeId),
+          courierLocationId: String(c.storeId),
+          name: c.senderName ? `${c.senderName} Store` : `Store #${c.storeId}`,
+          address: c.pickupAddress || "Registered Merchant Address",
+          phone: c.senderPhone || undefined,
+          isActive: true
+        }
+      ];
+    }
+
+    return [];
+  }
+
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
     try {
       this.validateConfig(c);
       const token = await this.token(c);
+      const chosenStoreId = p.pickupLocationId ? Number(p.pickupLocationId) : Number(c.storeId);
+
       const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/orders`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": key },
         body: JSON.stringify({
-          store_id: Number(c.storeId),
+          store_id: chosenStoreId,
           merchant_order_id: p.orderNumber,
           sender_name: c.senderName || "",
           sender_phone: c.senderPhone || "",
@@ -181,6 +266,20 @@ export class SteadfastProvider implements CourierProvider {
       headers: this.headers(c)
     });
     if (!response.ok) throw new Error("Steadfast credentials were rejected");
+  }
+
+  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+    this.validateConfig(c);
+    return [
+      {
+        id: "steadfast_primary",
+        courierLocationId: "steadfast_primary",
+        name: c.senderName ? `${c.senderName} Warehouse` : "Main Warehouse (Steadfast)",
+        address: c.pickupAddress || "Registered Merchant Address",
+        phone: c.senderPhone || undefined,
+        isActive: true
+      }
+    ];
   }
 
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
