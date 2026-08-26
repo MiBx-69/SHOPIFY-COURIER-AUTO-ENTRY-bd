@@ -61,6 +61,14 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
   // Check if order is currently skipped
   const isSkipped = events.length > 0 && events[0].event_type === "dispatch_skipped";
 
+  // Pickup location information from dispatch events or attempts
+  const dispatchEvent = events.find((e) => e.event_type === "order_dispatched");
+  const successfulAttempt = attempts.find((a) => a.status === "success");
+  const pickupLocationName = (dispatchEvent?.payload?.pickup_location_name as string) || 
+    (successfulAttempt?.request_metadata?.pickup_location_name as string);
+  const pickupAddress = (dispatchEvent?.payload?.pickup_address as string) || 
+    (successfulAttempt?.request_metadata?.pickup_address as string);
+
   // Build unified timeline
   const timeline = [
     ...(order.shopify_created_at ? [{
@@ -79,10 +87,11 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
       title: ev.event_type === "dispatch_skipped" ? "Removed from Dispatch Queue" :
              ev.event_type === "dispatch_restored" ? "Restored to Dispatch Queue" :
              ev.event_type === "dispatch_cancelled" ? "Courier Dispatch Cancelled" :
+             ev.event_type === "order_dispatched" ? `Dispatched via ${(ev.payload?.provider as string)?.toUpperCase() || "Courier"}` :
              ev.event_type.replace(/_/g, " "),
       time: ev.occurred_at,
       type: "event",
-      description: (ev.payload?.reason as string) || undefined
+      description: (ev.payload?.reason as string) || (ev.payload?.pickup_location_name ? `From: ${ev.payload.pickup_location_name}` : undefined)
     })),
     ...attempts.map((att) => ({
       title: `Dispatch Attempt: ${att.provider.toUpperCase()} (${att.status.toUpperCase()})`,
@@ -171,7 +180,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
           </div>
 
           {dispatch ? (
-            <div className="space-y-1.5 bg-slate-50/80 p-2.5 rounded-md border border-slate-100">
+            <div className="space-y-2 bg-slate-50/80 p-3 rounded-md border border-slate-100">
               <div className="flex justify-between items-center">
                 <span className="text-slate-500">Courier:</span>
                 <span className="font-semibold text-slate-800">{courierName || "Assigned Courier"}</span>
@@ -180,8 +189,20 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
                 <span className="text-slate-500">Tracking Number:</span>
                 <span className="font-mono font-semibold text-slate-900">{dispatch.tracking_id || "Pending"}</span>
               </div>
-              {dispatch.courier_status && (
+              {pickupLocationName && (
                 <div className="flex justify-between items-center">
+                  <span className="text-slate-500">Pickup Location:</span>
+                  <span className="font-medium text-slate-800">{pickupLocationName}</span>
+                </div>
+              )}
+              {pickupAddress && (
+                <div className="flex justify-between items-start">
+                  <span className="text-slate-500 shrink-0">Pickup Address:</span>
+                  <span className="text-right text-slate-600 font-medium pl-2">{pickupAddress}</span>
+                </div>
+              )}
+              {dispatch.courier_status && (
+                <div className="flex justify-between items-center pt-1 border-t border-slate-200/60">
                   <span className="text-slate-500">Courier Status:</span>
                   <span className="text-slate-700 font-medium capitalize">{dispatch.courier_status}</span>
                 </div>
