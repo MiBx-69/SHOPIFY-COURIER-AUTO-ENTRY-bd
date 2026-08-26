@@ -22,5 +22,9 @@ export async function requireShopPermission(shopId: string, permission: string) 
 export function apiError(error: unknown) {
   if (error instanceof ApiError) return NextResponse.json({ error: error.message }, { status: error.status });
   if (error instanceof Error && error.message === "RATE_LIMITED") return NextResponse.json({ error: "Too many requests. Please try again shortly." }, { status: 429 });
+  
+  // Log unexpected errors so we can debug them in Vercel/terminal
+  console.error("[API Error]", error);
+  
   return NextResponse.json({ error: "Unable to complete the request." }, { status: 500 });
 }
