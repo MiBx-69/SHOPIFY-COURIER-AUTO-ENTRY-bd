@@ -9,6 +9,7 @@ import {
   PaymentBadge, 
   DispatchBadge
 } from "@/components/ui/status-badge";
+import { OrderSyncButton } from "@/features/orders/order-sync-button";
 
 type DispatchAttempt = {
   id: string;
@@ -149,6 +150,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
               ) : (
                 <DispatchBadge status={order.dispatch_status} tracking={dispatch?.tracking_id} />
               )}
+              <OrderSyncButton shopId={order.shop_id} />
             </div>
           </div>
           <div className="sm:text-right">

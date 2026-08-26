@@ -350,14 +350,15 @@ export function OrderList({
       loadCounts();
       loadSavedFilters();
       loadCourierPickupLocations();
-      updateUrl(tab, filterDate, search);
+      updateUrl(isDispatchedMode ? "dispatched" : tab, filterDate, search);
     }, search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [loadOrders, loadCounts, loadSavedFilters, loadCourierPickupLocations, updateUrl, tab, filterDate, search]);
+  }, [loadOrders, loadCounts, loadSavedFilters, loadCourierPickupLocations, updateUrl, tab, filterDate, search, isDispatchedMode]);
 
   // Realtime updates
   useEffect(() => {
-    const channel = createClient()
+    const supabase = createClient();
+    const channel = supabase
       .channel(`orders_rt:${shopId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `shop_id=eq.${shopId}` }, () => {
         loadOrders();
@@ -370,7 +371,7 @@ export function OrderList({
       .subscribe();
 
     return () => {
-      createClient().removeChannel(channel);
+      supabase.removeChannel(channel);
     };
   }, [shopId, loadOrders, loadCounts]);
 
