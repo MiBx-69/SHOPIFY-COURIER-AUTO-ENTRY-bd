@@ -26,5 +26,7 @@ export function apiError(error: unknown) {
   // Log unexpected errors so we can debug them in Vercel/terminal
   console.error("[API Error]", error);
   
-  return NextResponse.json({ error: "Unable to complete the request." }, { status: 500 });
+  // Temporarily expose the actual error to the browser for debugging
+  const errorMessage = error instanceof Error ? error.message : typeof error === 'object' ? JSON.stringify(error) : String(error);
+  return NextResponse.json({ error: `Debug Error: ${errorMessage}` }, { status: 500 });
 }
