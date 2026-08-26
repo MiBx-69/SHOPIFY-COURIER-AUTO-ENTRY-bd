@@ -566,7 +566,7 @@ export function OrderList({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to process bulk dispatch");
 
-      const resList: BulkResultItem[] = data.results || [];
+      const resList: BulkResultItem[] = data.data || [];
       const successCount = resList.filter((r) => r.status === "dispatched").length;
       const failedCount = resList.filter((r) => r.status === "failed").length;
 
