@@ -42,7 +42,7 @@ create table public.memberships (
 create table public.shops (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
-  shop_domain text not null unique check (shop_domain ~ '^[a-z0-9][a-z0-9.-]*\\.myshopify\\.com$'),
+  shop_domain text not null unique check (shop_domain LIKE '%.myshopify.com'),
   shopify_shop_gid text not null unique,
   name text not null,
   currency char(3) not null default 'BDT',
