@@ -4,12 +4,12 @@ import { apiError, currentUser } from "@/lib/api/auth";
 import { encryptSecret } from "@/lib/security/crypto";
 import { safeShopDomain, verifyShopifyHmac } from "@/lib/security/shopify";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { serverEnv } from "@/lib/env";
+import { requireShopifyEnv } from "@/lib/env";
 import { registerShopifyWebhooks } from "@/services/shopify/client";
 export async function GET(request: NextRequest) { try {
   const { user } = await currentUser(); const params = request.nextUrl.searchParams;
   if (params.get("state") !== request.cookies.get("shopify_oauth_state")?.value || !verifyShopifyHmac(params)) return NextResponse.json({ error: "Invalid Shopify installation request" }, { status: 400 });
-  const shopDomain = safeShopDomain(params.get("shop") || ""); const code = params.get("code"); if (!code) return NextResponse.json({ error: "Missing Shopify authorization code" }, { status: 400 }); const env = serverEnv();
+  const shopDomain = safeShopDomain(params.get("shop") || ""); const code = params.get("code"); if (!code) return NextResponse.json({ error: "Missing Shopify authorization code" }, { status: 400 }); const env = requireShopifyEnv();
   const tokenResponse = await fetch(`https://${shopDomain}/admin/oauth/access_token`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ client_id: env.SHOPIFY_CLIENT_ID, client_secret: env.SHOPIFY_CLIENT_SECRET, code }), signal: AbortSignal.timeout(15_000) });
   const tokenResult = await tokenResponse.json() as { access_token?: string; scope?: string }; if (!tokenResponse.ok || !tokenResult.access_token) throw new Error("Shopify did not return an access token");
   const shopResponse = await fetch(`https://${shopDomain}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`, { method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": tokenResult.access_token }, body: JSON.stringify({ query: "{ shop { id name currencyCode ianaTimezone } }" }) }); const shopPayload = await shopResponse.json() as { data?: { shop?: { id: string; name: string; currencyCode: string; ianaTimezone: string } } }; const remoteShop = shopPayload.data?.shop; if (!remoteShop) throw new Error("Unable to identify Shopify store");
