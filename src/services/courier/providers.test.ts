@@ -54,44 +54,38 @@ describe("Steadfast provider", () => {
   });
 });
 
-describe("Pathao provider pickup locations", () => {
+describe("Redx provider", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("fetches and normalizes Pathao stores", async () => {
+  it("tests connection against areas endpoint with Bearer token", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "test-token" }), { status: 200 }))
-        .mockResolvedValueOnce(
-          new Response(
-            JSON.stringify({
-              data: {
-                data: [
-                  {
-                    store_id: 456,
-                    store_name: "Uttara Hub",
-                    store_address: "Uttara, Dhaka",
-                    is_active: 1
-                  }
-                ]
-              }
-            }),
-            { status: 200 }
-          )
-        )
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ areas: [{ id: 1, name: "Uttara" }] }), { status: 200 })
+      )
     );
+    const provider = new RedxProvider();
+    await expect(provider.testConnection({ apiToken: "test-token" })).resolves.toBeUndefined();
+  });
 
-    const provider = new PathaoProvider();
-    const locations = await provider.getPickupLocations({
-      clientId: "cid",
-      clientSecret: "csec",
-      username: "user",
-      password: "pwd",
-      baseUrl: "https://courier.test"
-    });
-
-    expect(locations.length).toBe(1);
-    expect(locations[0].courierLocationId).toBe("456");
-    expect(locations[0].name).toBe("Uttara Hub");
+  it("fetches pickup stores", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            pickup_stores: [
+              { id: 16376, name: "Uttara Hub", address: "Sector 10", phone: "01700000000" }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+    );
+    const provider = new RedxProvider();
+    const locs = await provider.getPickupLocations({ apiToken: "test-token" });
+    expect(locs.length).toBe(1);
+    expect(locs[0].courierLocationId).toBe("16376");
+    expect(locs[0].name).toBe("Uttara Hub");
   });
 });

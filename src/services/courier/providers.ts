@@ -9,27 +9,40 @@ function unknown(error: unknown): CourierResult {
   return { outcome: "unknown", message: error instanceof Error ? error.message : "Courier request outcome is unknown" };
 }
 
+function redxToken(apiToken?: string) {
+  const t = apiToken?.trim() || "";
+  return t.startsWith("Bearer ") ? t : `Bearer ${t}`;
+}
+
 export class RedxProvider implements CourierProvider {
   readonly name = "redx" as const;
 
   validateConfig(c: Record<string, string>) {
     requireFields(c, ["apiToken"]);
-    if (!base(c, process.env.REDX_API_URL)) throw new Error("REDX_API_URL or credentials.baseUrl is required");
+  }
+
+  private baseUrl(c: Record<string, string>) {
+    return base(c, process.env.REDX_API_URL || "https://openapi.redx.com.bd/v1.0.0-beta");
   }
 
   async testConnection(c: Record<string, string>) {
     this.validateConfig(c);
-    const { response } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/parcel/track`, {
-      headers: { "API-ACCESS-TOKEN": c.apiToken }
+    const token = redxToken(c.apiToken);
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/areas`, {
+      headers: { "API-ACCESS-TOKEN": token }
     });
-    if (!response.ok && response.status !== 400) throw new Error("REDX credentials were rejected");
+    if (!response.ok) {
+      const err = (data as { message?: string })?.message || "REDX credentials were rejected";
+      throw new Error(err);
+    }
   }
 
   async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
     this.validateConfig(c);
+    const token = redxToken(c.apiToken);
     try {
-      const { response, data } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/pickup-stores`, {
-        headers: { "API-ACCESS-TOKEN": c.apiToken }
+      const { response, data } = await courierFetch(`${this.baseUrl(c)}/pickup/stores`, {
+        headers: { "API-ACCESS-TOKEN": token }
       });
       const d = data as { pickup_stores?: Array<Record<string, unknown>>; stores?: Array<Record<string, unknown>> };
       const rawStores = d?.pickup_stores || d?.stores || [];
@@ -41,8 +54,8 @@ export class RedxProvider implements CourierProvider {
           name: String(s.name || s.store_name || "Main Warehouse"),
           address: String(s.address || s.pickup_address || "Dhaka"),
           phone: s.phone ? String(s.phone) : undefined,
-          city: s.city ? String(s.city) : undefined,
-          area: s.area ? String(s.area) : undefined,
+          city: (s.district_name || s.city) ? String(s.district_name || s.city) : undefined,
+          area: (s.area_name || s.area) ? String(s.area_name || s.area) : undefined,
           isActive: s.status !== "inactive"
         }));
       }
@@ -66,6 +79,7 @@ export class RedxProvider implements CourierProvider {
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
     try {
       this.validateConfig(c);
+      const token = redxToken(c.apiToken);
       const payload: Record<string, unknown> = {
         customer_name: p.customerName,
         customer_phone: p.phone,
@@ -81,9 +95,9 @@ export class RedxProvider implements CourierProvider {
         payload.pickup_store_id = isNaN(Number(p.pickupLocationId)) ? p.pickupLocationId : Number(p.pickupLocationId);
       }
 
-      const { response, data } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/parcel`, {
+      const { response, data } = await courierFetch(`${this.baseUrl(c)}/parcel`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "API-ACCESS-TOKEN": c.apiToken, "Idempotency-Key": key },
+        headers: { "Content-Type": "application/json", "API-ACCESS-TOKEN": token, "Idempotency-Key": key },
         body: JSON.stringify(payload)
       });
       const d = data as Record<string, unknown>;
@@ -91,15 +105,20 @@ export class RedxProvider implements CourierProvider {
       if (response.ok && tracking) {
         return { outcome: "success", trackingId: tracking, courierReference: String(d.parcel_id || tracking), metadata: { status: response.status } };
       }
-      return { outcome: response.status >= 500 ? "unknown" : "known_failure", message: "REDX did not accept this shipment", metadata: { status: response.status } };
+      return { 
+        outcome: response.status >= 500 ? "unknown" : "known_failure", 
+        message: (d.message as string) || "REDX did not accept this shipment", 
+        metadata: { status: response.status, data: d } 
+      };
     } catch (e) {
       return unknown(e);
     }
   }
 
   async getTracking(trackingId: string, c: Record<string, string>) {
-    const { response, data } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/parcel/track/${encodeURIComponent(trackingId)}`, {
-      headers: { "API-ACCESS-TOKEN": c.apiToken }
+    const token = redxToken(c.apiToken);
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/parcel/info/${encodeURIComponent(trackingId)}`, {
+      headers: { "API-ACCESS-TOKEN": token }
     });
     if (!response.ok) throw new Error("Unable to fetch REDX tracking");
     const d = data as Record<string, unknown>;
@@ -108,9 +127,10 @@ export class RedxProvider implements CourierProvider {
 
   async cancelShipment(trackingId: string, c: Record<string, string>): Promise<void> {
     this.validateConfig(c);
-    const { response, data } = await courierFetch(`${base(c, process.env.REDX_API_URL)}/parcel/cancel/${encodeURIComponent(trackingId)}`, {
+    const token = redxToken(c.apiToken);
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/parcel/cancel/${encodeURIComponent(trackingId)}`, {
       method: "POST",
-      headers: { "API-ACCESS-TOKEN": c.apiToken }
+      headers: { "API-ACCESS-TOKEN": token }
     });
     if (!response.ok) {
       const d = data as { message?: string };
@@ -124,11 +144,14 @@ export class PathaoProvider implements CourierProvider {
 
   validateConfig(c: Record<string, string>) {
     requireFields(c, ["clientId", "clientSecret", "username", "password"]);
-    if (!base(c, process.env.PATHAO_API_URL)) throw new Error("PATHAO_API_URL or credentials.baseUrl is required");
+  }
+
+  private baseUrl(c: Record<string, string>) {
+    return base(c, process.env.PATHAO_API_URL || "https://api-hermes.pathao.com");
   }
 
   private async token(c: Record<string, string>) {
-    const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/issue-token`, {
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/issue-token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -152,7 +175,7 @@ export class PathaoProvider implements CourierProvider {
   async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
     this.validateConfig(c);
     const token = await this.token(c);
-    const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/stores`, {
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/stores`, {
       headers: { Authorization: `Bearer ${token}` }
     });
 
@@ -194,7 +217,7 @@ export class PathaoProvider implements CourierProvider {
       const token = await this.token(c);
       const chosenStoreId = p.pickupLocationId ? Number(p.pickupLocationId) : Number(c.storeId);
 
-      const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/orders`, {
+      const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/orders`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": key },
         body: JSON.stringify({
@@ -226,7 +249,7 @@ export class PathaoProvider implements CourierProvider {
 
   async getTracking(trackingId: string, c: Record<string, string>) {
     const token = await this.token(c);
-    const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/info`, {
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/info`, {
       headers: { Authorization: `Bearer ${token}` }
     });
     if (!response.ok) throw new Error("Unable to fetch Pathao tracking");
@@ -237,7 +260,7 @@ export class PathaoProvider implements CourierProvider {
   async cancelShipment(trackingId: string, c: Record<string, string>): Promise<void> {
     this.validateConfig(c);
     const token = await this.token(c);
-    const { response, data } = await courierFetch(`${base(c, process.env.PATHAO_API_URL)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/cancel`, {
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/cancel`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
     });
@@ -253,7 +276,10 @@ export class SteadfastProvider implements CourierProvider {
 
   validateConfig(c: Record<string, string>) {
     requireFields(c, ["apiKey", "secretKey"]);
-    if (!base(c, process.env.STEADFAST_API_URL)) throw new Error("STEADFAST_API_URL or credentials.baseUrl is required");
+  }
+
+  private baseUrl(c: Record<string, string>) {
+    return base(c, process.env.STEADFAST_API_URL || "https://portal.steadfast.com.bd");
   }
 
   private headers(c: Record<string, string>) {
@@ -262,7 +288,7 @@ export class SteadfastProvider implements CourierProvider {
 
   async testConnection(c: Record<string, string>) {
     this.validateConfig(c);
-    const { response } = await courierFetch(`${base(c, process.env.STEADFAST_API_URL)}/api/v1/get_balance`, {
+    const { response } = await courierFetch(`${this.baseUrl(c)}/api/v1/get_balance`, {
       headers: this.headers(c)
     });
     if (!response.ok) throw new Error("Steadfast credentials were rejected");
