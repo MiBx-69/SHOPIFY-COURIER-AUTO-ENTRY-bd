@@ -5,6 +5,8 @@ import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { OrderList } from "@/features/orders/order-list";
 
+export const metadata = { title: "Orders | MiBx-Dispatch" };
+
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ shop?: string }> }) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();

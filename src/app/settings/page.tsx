@@ -7,8 +7,9 @@ import { ShopifyConnect } from "@/features/settings/shopify-connect";
 import { CourierSettings, type CourierConfig } from "@/features/settings/courier-settings";
 import { DispatchSettings } from "@/features/settings/dispatch-settings";
 import { IntegrationAuditLog } from "@/features/settings/integration-audit-log";
+import { PasskeyManager } from "@/features/settings/passkey-manager";
 
-export const metadata = { title: "Settings — Dispatch Platform" };
+export const metadata = { title: "Settings | MiBx-Dispatch" };
 
 export default async function SettingsPage() {
   // Auth: use SSR client to get verified user identity
@@ -145,6 +146,19 @@ export default async function SettingsPage() {
             />
           </section>
         )}
+
+        {/* ── Account & Passkeys ─────────────────────────────────────────── */}
+        <section>
+          <div className="mb-3">
+            <h2 className="text-base font-bold text-slate-900">Account & Passkeys</h2>
+            <p className="text-sm text-slate-500">
+              Manage biometric passkeys (Touch ID, Face ID, Windows Hello, YubiKey) for fast, secure sign-in.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs">
+            <PasskeyManager />
+          </div>
+        </section>
 
         {/* ── Integration Audit Log ─────────────────────────────────────── */}
         {shop && (

@@ -3,6 +3,8 @@ import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { OrderList } from "@/features/orders/order-list";
 
+export const metadata = { title: "Dispatched | MiBx-Dispatch" };
+
 export default async function DispatchedPage() {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();

@@ -14,6 +14,85 @@ function redxToken(apiToken?: string) {
   return t.startsWith("Bearer ") ? t : `Bearer ${t}`;
 }
 
+export function normalizeBdPhone(rawPhone?: string | null): string {
+  if (!rawPhone) return "";
+  // Strip all non-digit characters
+  let digits = String(rawPhone).replace(/\D/g, "");
+  // If starts with 880 (e.g. 8801712345678 or +8801712345678), remove country code 88
+  if (digits.startsWith("880") && digits.length >= 13) {
+    digits = digits.slice(2);
+  } else if (digits.length === 10 && digits.startsWith("1")) {
+    // Missing leading 0 (e.g. 1712345678)
+    digits = "0" + digits;
+  }
+  return digits;
+}
+
+export function normalizeDeliveryAddress(addr?: Record<string, string> | null, fullText?: string): string {
+  if (fullText && fullText.trim().length >= 10) {
+    return fullText.trim();
+  }
+  if (!addr || typeof addr !== "object") {
+    return (fullText || "Dhaka, Bangladesh").trim();
+  }
+  const parts = [
+    addr.address1,
+    addr.address2,
+    addr.area,
+    addr.city,
+    addr.province,
+    addr.zip,
+    addr.country || "Bangladesh"
+  ]
+    .filter(Boolean)
+    .map((s) => String(s).trim())
+    .filter((s) => s.length > 0);
+
+  let formatted = parts.join(", ");
+  if (formatted.length < 10) {
+    formatted = `${formatted}, Bangladesh`.replace(/,\s*,/g, ",").trim();
+  }
+  if (formatted.length < 10) {
+    formatted = `${formatted} (Delivery Address)`.trim();
+  }
+  return formatted || "Dhaka, Bangladesh";
+}
+
+export function extractCourierErrorMessage(data: unknown, fallbackMessage: string): string {
+  if (!data || typeof data !== "object") return fallbackMessage;
+  const d = data as Record<string, unknown>;
+
+  // Check for nested errors object (Pathao / REDX / Laravel format)
+  if (d.errors && typeof d.errors === "object") {
+    const errorDetails: string[] = [];
+    for (const [key, val] of Object.entries(d.errors as Record<string, unknown>)) {
+      if (Array.isArray(val)) {
+        errorDetails.push(`${key}: ${val.join(", ")}`);
+      } else if (typeof val === "string") {
+        errorDetails.push(`${key}: ${val}`);
+      } else if (typeof val === "object" && val !== null) {
+        errorDetails.push(`${key}: ${JSON.stringify(val)}`);
+      }
+    }
+    if (errorDetails.length > 0) {
+      const baseMsg = typeof d.message === "string" ? d.message : fallbackMessage;
+      return `${baseMsg} (${errorDetails.join("; ")})`;
+    }
+  }
+
+  if (typeof d.message === "string" && d.message.trim().length > 0) {
+    return d.message;
+  }
+  if (typeof d.error === "string" && d.error.trim().length > 0) {
+    return d.error;
+  }
+  if (typeof d.msg === "string" && d.msg.trim().length > 0) {
+    return d.msg;
+  }
+
+  return fallbackMessage;
+}
+
 export class RedxProvider implements CourierProvider {
   readonly name = "redx" as const;
 
@@ -80,19 +159,37 @@ export class RedxProvider implements CourierProvider {
     try {
       this.validateConfig(c);
       const token = redxToken(c.apiToken);
+
+      const phone = normalizeBdPhone(p.phone);
+      if (!phone || phone.length < 11) {
+        return {
+          outcome: "known_failure",
+          message: `Invalid customer phone number: "${p.phone}". REDX requires an 11-digit mobile number.`
+        };
+      }
+
+      let address = (p.fullAddress || "").trim();
+      if (address.length < 10) {
+        address = `${address}, ${p.area || ""}, ${p.city || "Dhaka"}, Bangladesh`.replace(/,\s*,/g, ",").trim();
+      }
+
+      const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
+      const weight = Number(c.defaultWeightKg || 0.5) || 0.5;
+
       const payload: Record<string, unknown> = {
-        customer_name: p.customerName,
-        customer_phone: p.phone,
-        delivery_area: p.area || p.city || "",
-        delivery_address: p.fullAddress,
-        merchant_invoice_id: p.orderNumber,
-        cash_collection_amount: p.codAmount,
-        parcel_weight: c.defaultWeightKg || "0.5",
+        customer_name: p.customerName || "Customer",
+        customer_phone: phone,
+        delivery_area: p.area || p.city || "Dhaka",
+        delivery_address: address,
+        merchant_invoice_id: String(p.orderNumber || p.orderId),
+        cash_collection_amount: codAmount,
+        parcel_weight: weight,
         instruction: p.notes || ""
       };
 
       if (p.pickupLocationId && p.pickupLocationId !== "redx_default_hub") {
-        payload.pickup_store_id = isNaN(Number(p.pickupLocationId)) ? p.pickupLocationId : Number(p.pickupLocationId);
+        const storeNum = Number(p.pickupLocationId);
+        payload.pickup_store_id = !isNaN(storeNum) && storeNum > 0 ? storeNum : p.pickupLocationId;
       }
 
       const { response, data } = await courierFetch(`${this.baseUrl(c)}/parcel`, {
@@ -105,9 +202,11 @@ export class RedxProvider implements CourierProvider {
       if (response.ok && tracking) {
         return { outcome: "success", trackingId: tracking, courierReference: String(d.parcel_id || tracking), metadata: { status: response.status } };
       }
+
+      const errorMsg = extractCourierErrorMessage(data, (d.message as string) || "REDX did not accept this shipment");
       return { 
         outcome: response.status >= 500 ? "unknown" : "known_failure", 
-        message: (d.message as string) || "REDX did not accept this shipment", 
+        message: errorMsg, 
         metadata: { status: response.status, data: d } 
       };
     } catch (e) {
@@ -215,33 +314,84 @@ export class PathaoProvider implements CourierProvider {
     try {
       this.validateConfig(c);
       const token = await this.token(c);
-      const chosenStoreId = p.pickupLocationId ? Number(p.pickupLocationId) : Number(c.storeId);
+
+      // Resolve store_id
+      let chosenStoreId = Number(p.pickupLocationId);
+      if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
+        chosenStoreId = Number(c.storeId);
+      }
+      if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
+        // Fallback: fetch available stores to find the first valid integer store_id
+        try {
+          const locations = await this.getPickupLocations(c);
+          const validLoc = locations.find((l) => !isNaN(Number(l.courierLocationId || l.id)) && Number(l.courierLocationId || l.id) > 0);
+          if (validLoc) {
+            chosenStoreId = Number(validLoc.courierLocationId || validLoc.id);
+          }
+        } catch {
+          // Ignored
+        }
+      }
+
+      if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
+        return {
+          outcome: "known_failure",
+          message: "Pathao requires a valid numeric Pickup Store ID. Please configure your store in Settings."
+        };
+      }
+
+      const phone = normalizeBdPhone(p.phone);
+      if (!phone || phone.length < 11) {
+        return {
+          outcome: "known_failure",
+          message: `Invalid customer phone number: "${p.phone}". Pathao requires an 11-digit Bangladeshi mobile number (e.g. 01XXXXXXXXX).`
+        };
+      }
+
+      let address = (p.fullAddress || "").trim();
+      if (address.length < 10) {
+        address = `${address}, ${p.area || ""}, ${p.city || "Dhaka"}, Bangladesh`.replace(/,\s*,/g, ",").trim();
+      }
+
+      const itemQty = Math.max(1, (p.items || []).reduce((n, item) => n + (item.quantity || 1), 0));
+      const weight = Math.max(0.5, Math.min(10.0, Number(c.defaultWeightKg || 0.5) || 0.5));
+      const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
+      const itemDesc = (p.items || []).map((i) => `${i.productName || "Item"}${i.variant ? ` (${i.variant})` : ""}`).join(", ").slice(0, 150) || "General Goods";
+
+      const payload = {
+        store_id: chosenStoreId,
+        merchant_order_id: String(p.orderNumber || p.orderId).replace(/[^a-zA-Z0-9_-]/g, "") || String(p.orderId),
+        sender_name: c.senderName || "Merchant",
+        sender_phone: normalizeBdPhone(c.senderPhone) || "01700000000",
+        recipient_name: p.customerName || "Customer",
+        recipient_phone: phone,
+        recipient_address: address,
+        delivery_type: Number(c.deliveryType || 48),
+        item_type: Number(c.itemType || 2),
+        special_instruction: p.notes || "",
+        item_quantity: itemQty,
+        item_weight: weight,
+        item_description: itemDesc,
+        amount_to_collect: codAmount
+      };
 
       const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/orders`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Idempotency-Key": key },
-        body: JSON.stringify({
-          store_id: chosenStoreId,
-          merchant_order_id: p.orderNumber,
-          sender_name: c.senderName || "",
-          sender_phone: c.senderPhone || "",
-          recipient_name: p.customerName,
-          recipient_phone: p.phone,
-          recipient_address: p.fullAddress,
-          delivery_type: Number(c.deliveryType || 48),
-          item_type: Number(c.itemType || 2),
-          special_instruction: p.notes || "",
-          item_quantity: p.items.reduce((n, item) => n + item.quantity, 0),
-          item_weight: Number(c.defaultWeightKg || 0.5),
-          amount_to_collect: p.codAmount
-        })
+        body: JSON.stringify(payload)
       });
       const d = data as { data?: { consignment_id?: string; order_id?: string }; message?: string };
       const tracking = d.data?.consignment_id;
       if (response.ok && tracking) {
         return { outcome: "success", trackingId: tracking, courierReference: d.data?.order_id, metadata: { status: response.status } };
       }
-      return { outcome: response.status >= 500 ? "unknown" : "known_failure", message: d.message || "Pathao did not accept this shipment", metadata: { status: response.status } };
+
+      const errorMsg = extractCourierErrorMessage(data, d.message || "Pathao did not accept this shipment");
+      return { 
+        outcome: response.status >= 500 ? "unknown" : "known_failure", 
+        message: errorMsg, 
+        metadata: { status: response.status, data: d } 
+      };
     } catch (e) {
       return unknown(e);
     }
@@ -311,15 +461,31 @@ export class SteadfastProvider implements CourierProvider {
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
     try {
       this.validateConfig(c);
+
+      const phone = normalizeBdPhone(p.phone);
+      if (!phone || phone.length < 11) {
+        return {
+          outcome: "known_failure",
+          message: `Invalid customer phone number: "${p.phone}". Steadfast requires an 11-digit mobile number.`
+        };
+      }
+
+      let address = (p.fullAddress || "").trim();
+      if (address.length < 10) {
+        address = `${address}, ${p.area || ""}, ${p.city || "Dhaka"}, Bangladesh`.replace(/,\s*,/g, ",").trim();
+      }
+
+      const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
+
       const { response, data } = await courierFetch(`${base(c, process.env.STEADFAST_API_URL)}/api/v1/create_order`, {
         method: "POST",
         headers: { ...this.headers(c), "Idempotency-Key": key },
         body: JSON.stringify({
-          invoice: p.orderNumber,
-          recipient_name: p.customerName,
-          recipient_phone: p.phone,
-          recipient_address: p.fullAddress,
-          cod_amount: p.codAmount,
+          invoice: String(p.orderNumber || p.orderId),
+          recipient_name: p.customerName || "Customer",
+          recipient_phone: phone,
+          recipient_address: address,
+          cod_amount: codAmount,
           note: p.notes || "",
           delivery_type: Number(c.deliveryType || 0)
         })
@@ -329,7 +495,13 @@ export class SteadfastProvider implements CourierProvider {
       if (response.ok && tracking) {
         return { outcome: "success", trackingId: tracking, courierReference: d.consignment_id, metadata: { status: response.status } };
       }
-      return { outcome: response.status >= 500 ? "unknown" : "known_failure", message: d.message || "Steadfast did not accept this shipment", metadata: { status: response.status } };
+
+      const errorMsg = extractCourierErrorMessage(data, d.message || "Steadfast did not accept this shipment");
+      return { 
+        outcome: response.status >= 500 ? "unknown" : "known_failure", 
+        message: errorMsg, 
+        metadata: { status: response.status, data: d } 
+      };
     } catch (e) {
       return unknown(e);
     }

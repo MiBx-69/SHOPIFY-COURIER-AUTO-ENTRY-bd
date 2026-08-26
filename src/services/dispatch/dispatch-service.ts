@@ -3,12 +3,9 @@ import { decryptSecret } from "@/lib/security/crypto";
 import { courierRegistry } from "@/services/courier/registry";
 import { selectCourier } from "@/services/courier/selector";
 import { PickupLocationService } from "@/services/courier/pickup-locations";
+import { normalizeBdPhone, normalizeDeliveryAddress } from "@/services/courier/providers";
 import { updateShopifyDispatchMetafields, createShopifyFulfillment } from "@/services/shopify/client";
 import type { NormalizedShipment } from "@/types/domain";
-
-function address(value: Record<string, string>) {
-  return [value.address1, value.address2, value.area, value.city, value.province, value.zip, value.country].filter(Boolean).join(", ");
-}
 
 export class DispatchService {
   async execute(dispatchId: string, requestedConfigId?: string, requestedPickupLocationId?: string, actorId?: string) {
@@ -41,29 +38,47 @@ export class DispatchService {
     const { data: secret, error: secretError } = await admin.from("courier_secrets").select("ciphertext,iv,auth_tag").eq("courier_config_id", selected.id).single();
     if (secretError || !secret) return this.fail(dispatch, "Courier credentials are unavailable");
     const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
-    const items = order.order_line_items as Array<Record<string, unknown>>;
+    const items = (order.order_line_items || []) as Array<Record<string, unknown>>;
+
+    const normalizedPhone = normalizeBdPhone(String(order.customer_phone || ""));
+    if (!normalizedPhone || normalizedPhone.length < 11) {
+      return this.fail(dispatch, `Customer phone (${order.customer_phone || "none"}) is invalid. Courier requires an 11-digit mobile number.`);
+    }
+
+    const shippingAddr = (order.shipping_address || {}) as Record<string, string>;
+    const formattedAddress = normalizeDeliveryAddress(shippingAddr);
+
+    const isPrepaid = String(order.financial_status || "").toLowerCase() === "paid";
+    const codAmount = isPrepaid ? 0 : Math.max(0, Math.round(Number(order.total_minor || 0) / 100));
+
+    const orderNumberStr = String(
+      order.order_number && Number(order.order_number) > 0
+        ? order.order_number
+        : (order.name || order.id)
+    ).replace(/[^a-zA-Z0-9_-]/g, "") || String(order.name || order.id);
+
     const payload: NormalizedShipment = {
       orderId: String(order.id),
-      orderNumber: String(order.order_number),
-      customerName: String(order.customer_name || ""),
-      phone: String(order.customer_phone),
+      orderNumber: orderNumberStr,
+      customerName: String(order.customer_name || "Customer"),
+      phone: normalizedPhone,
       email: order.customer_email ? String(order.customer_email) : undefined,
-      fullAddress: address(order.shipping_address as Record<string, string>),
-      city: (order.shipping_address as Record<string, string>).city,
-      area: (order.shipping_address as Record<string, string>).area,
-      postalCode: (order.shipping_address as Record<string, string>).zip,
-      codAmount: Number(order.total_minor) / 100,
+      fullAddress: formattedAddress,
+      city: shippingAddr.city || "Dhaka",
+      area: shippingAddr.area || shippingAddr.province || undefined,
+      postalCode: shippingAddr.zip || undefined,
+      codAmount: codAmount,
       notes: order.note ? String(order.note) : undefined,
       pickupLocationId: chosenLocation.courierLocationId || chosenLocation.id,
       pickupLocationName: chosenLocation.name,
       pickupAddress: chosenLocation.address,
       pickupPhone: chosenLocation.phone,
       items: items.map((item) => ({
-        productName: String(item.title),
+        productName: String(item.title || "Product"),
         variant: item.variant_title ? String(item.variant_title) : undefined,
         sku: item.sku ? String(item.sku) : undefined,
-        quantity: Number(item.quantity),
-        price: Number(item.unit_price_minor) / 100
+        quantity: Math.max(1, Number(item.quantity) || 1),
+        price: Number(item.unit_price_minor || 0) / 100
       }))
     };
 

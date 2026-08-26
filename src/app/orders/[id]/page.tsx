@@ -29,6 +29,15 @@ type OrderEvent = {
   occurred_at: string;
 };
 
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await createServerSupabaseClient();
+  const { data: order } = await supabase.from("orders").select("name").eq("id", id).maybeSingle();
+  return {
+    title: order?.name ? `Order ${order.name} | MiBx-Dispatch` : "Order Details | MiBx-Dispatch"
+  };
+}
+
 export default async function OrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -79,7 +88,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
       description: `Customer placed order ${order.name}`
     }] : []),
     ...(order.created_at ? [{
-      title: "Synchronized with Dispatch Hub",
+      title: "Synchronized with MiBx-Dispatch",
       time: order.created_at,
       type: "sync",
       description: "Order ingested and prepared for courier processing"

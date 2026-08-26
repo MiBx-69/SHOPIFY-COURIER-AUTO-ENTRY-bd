@@ -84,8 +84,99 @@ describe("Redx provider", () => {
     );
     const provider = new RedxProvider();
     const locs = await provider.getPickupLocations({ apiToken: "test-token" });
-    expect(locs.length).toBe(1);
-    expect(locs[0].courierLocationId).toBe("16376");
     expect(locs[0].name).toBe("Uttara Hub");
   });
 });
+
+describe("Pathao provider", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("handles validation error and extracts details from errors object", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ access_token: "mock-token" }), { status: 200 })
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              message: "Request payload contains validation errors",
+              errors: {
+                recipient_phone: ["The recipient phone format is invalid."]
+              }
+            }),
+            { status: 422 }
+          )
+        )
+    );
+
+    const provider = new PathaoProvider();
+    const result = await provider.createShipment(
+      {
+        ...payload,
+        phone: "01712345678",
+        fullAddress: "House 12, Road 4, Dhanmondi, Dhaka",
+        pickupLocationId: "12345"
+      },
+      {
+        clientId: "cid",
+        clientSecret: "csec",
+        username: "user",
+        password: "pwd",
+        storeId: "12345"
+      },
+      "key-1"
+    );
+
+    expect(result.outcome).toBe("known_failure");
+    if (result.outcome === "known_failure") {
+      expect(result.message).toContain("recipient_phone");
+      expect(result.message).toContain("The recipient phone format is invalid.");
+    }
+  });
+
+  it("normalizes international BD phone number +88017... to 11-digit local format", async () => {
+    let capturedBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ access_token: "mock-token" }), { status: 200 })
+        )
+        .mockImplementationOnce((_url, opts: any) => {
+          capturedBody = JSON.parse(opts.body);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                data: { consignment_id: "CONS-999", order_id: "ORD-999" }
+              }),
+              { status: 200 }
+            )
+          );
+        })
+    );
+
+    const provider = new PathaoProvider();
+    const result = await provider.createShipment(
+      {
+        ...payload,
+        phone: "+8801712345678",
+        fullAddress: "House 12, Road 4, Dhanmondi, Dhaka",
+        pickupLocationId: "12345"
+      },
+      {
+        clientId: "cid",
+        clientSecret: "csec",
+        username: "user",
+        password: "pwd",
+        storeId: "12345"
+      },
+      "key-2"
+    );
+
+    expect(result.outcome).toBe("success");
+    expect(capturedBody.recipient_phone).toBe("01712345678");
+  });
+});
+

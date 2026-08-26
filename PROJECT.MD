@@ -3090,3 +3090,38 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
 ### 6. Order Details Display
 - The Order Details page (`/orders/[id]`) renders the courier name, tracking number, pickup location name, and pickup address in the Dispatch & Fulfillment card.
 
+---
+
+# 93. MiBx-Dispatch Branding & Passkey Authentication Architecture
+
+### 1. Brand Identity & Official Assets
+- **Application Name**: `MiBx-Dispatch` (exact capitalization used across the entire product).
+- **Official Slogan**: `"Sync. • Dispatch. • Deliver. • Done."`
+- **Primary Brand Asset**: `/public/logo.png` (official source logo).
+- **Metadata & Favicons**:
+  - Root Layout Title Template: `%s | MiBx-Dispatch` (Default: `MiBx-Dispatch`).
+  - Favicon & Touch Icons: Linked to `/logo.png`.
+  - PWA Manifest (`/manifest.webmanifest`): Configured with `MiBx-Dispatch`, slogan description, and multi-resolution maskable icons.
+  - OpenGraph / Social Cards: Integrated with `/logo.png`.
+
+### 2. Primary Passkey Authentication (WebAuthn)
+- **Primary Sign-In**: **`[ Continue with Passkey ]`** is the prominent and dominant sign-in method on `/login`.
+- **Native Browser & Device Support**:
+  - Touch ID, Face ID, Windows Hello, Android Biometrics, and hardware security keys (e.g. YubiKey).
+  - Uses native WebAuthn API (`PublicKeyCredential`) via Supabase Auth.
+- **Graceful Error & State Handling**:
+  - `User Cancelled`: Friendly notice without intimidating error banners.
+  - `Unsupported Device/Browser`: Clear notification advising password fallback.
+  - `No Registered Passkey`: Clear guidance advising to sign in with password and enroll the device in Settings.
+- **Secondary Fallback**: Clean email and password sign-in form with full password-reset email capabilities.
+
+### 3. Passkey Management in Settings (`Settings → Account & Passkeys`)
+- **Passkey Registry**:
+  - **Register New Passkey**: Triggers WebAuthn enrollment with browser platform identification (e.g., "MacBook / Chrome", "Windows Hello").
+  - **Inline Renaming**: Allows merchants to assign friendly custom labels to credentials.
+  - **Audit Metadata**: Displays creation date and status.
+  - **Revocation**: Safely removes/deletes the passkey from the Supabase account.
+  - **Session Security**: Provides "Sign out other sessions" to revoke active tokens on other devices.
+- **Cryptographic Security**: Raw private keys never leave the merchant's hardware; only public key credentials and counter data are verified by Supabase Auth.
+
+
