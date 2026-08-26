@@ -1,0 +1,14 @@
+client_id = "${SHOPIFY_CLIENT_ID}"
+name = "Dispatch"
+application_url = "${SHOPIFY_APP_URL}"
+embedded = true
+
+[access_scopes]
+scopes = "read_orders,write_orders,read_products,read_fulfillments,write_fulfillments"
+
+[auth]
+redirect_urls = ["${SHOPIFY_APP_URL}/api/shopify/callback"]
+
+[[webhooks.subscriptions]]
+topics = ["orders/create", "orders/updated", "orders/cancelled", "orders/fulfilled", "fulfillments/create", "fulfillments/update", "products/update", "products/delete", "app/uninstalled"]
+uri = "${SHOPIFY_APP_URL}/api/webhooks/shopify"
