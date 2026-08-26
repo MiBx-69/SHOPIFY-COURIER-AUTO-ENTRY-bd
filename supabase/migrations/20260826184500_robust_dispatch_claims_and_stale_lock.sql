@@ -30,7 +30,7 @@ begin
     raise exception 'Order is cancelled in Shopify and cannot be dispatched' using errcode = '22023'; 
   end if;
 
-  if target.is_skipped is true then
+  if target.dispatch_status = 'skipped' then
     raise exception 'Order is removed from dispatch queue. Restore it before dispatching.' using errcode = '22023';
   end if;
   
