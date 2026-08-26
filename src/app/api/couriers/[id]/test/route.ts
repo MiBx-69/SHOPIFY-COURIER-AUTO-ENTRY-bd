@@ -103,8 +103,8 @@ export async function POST(
 
     if (testError) {
       return NextResponse.json({
-        error: `${displayName} connection test failed`,
-        data: { connected: false, provider, displayName, latencyMs, testedAt }
+        error: testError,
+        data: { connected: false, provider, displayName, latencyMs, testedAt, error: testError }
       }, { status: 400 });
     }
 

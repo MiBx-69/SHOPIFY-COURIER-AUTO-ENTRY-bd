@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
             orderId,
             orderName: order.name,
             status: "skipped" as const,
-            reason: "Order is cancelled"
+            reason: "Order is cancelled in Shopify"
           };
         }
 
@@ -122,12 +122,13 @@ export async function POST(request: NextRequest) {
             input.pickupLocationId,
             user.id
           );
-          if (!execution.data || execution.data.status === "failed") {
+
+          if (!execution.success) {
             return {
               orderId,
               orderName: order.name,
               status: "failed" as const,
-              reason: execution.data?.safe_error_message || "Courier dispatch rejected shipment"
+              reason: execution.error || "Courier rejected shipment creation"
             };
           }
 
@@ -135,8 +136,8 @@ export async function POST(request: NextRequest) {
             orderId,
             orderName: order.name,
             status: "dispatched" as const,
-            trackingId: execution.data.tracking_id || undefined,
-            courierName: execution.data.courier_reference || undefined
+            trackingId: execution.trackingId,
+            courierName: execution.courierName
           };
         } catch (execErr) {
           return {

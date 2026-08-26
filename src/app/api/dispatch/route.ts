@@ -16,7 +16,10 @@ export async function POST(request: NextRequest) {
     });
 
     if (error || !dispatch) {
-      return NextResponse.json({ error: "The order cannot be dispatched." }, { status: 409 });
+      return NextResponse.json({ 
+        success: false,
+        error: "This order cannot be claimed for dispatch or is already being processed." 
+      }, { status: 409 });
     }
 
     const result = await new DispatchService().execute(
@@ -26,7 +29,24 @@ export async function POST(request: NextRequest) {
       user.id
     );
 
-    return NextResponse.json({ data: result.data }, { status: result.error ? 500 : 200 });
+    if (!result.success) {
+      return NextResponse.json({
+        success: false,
+        status: result.status,
+        error: result.error || "Courier dispatch rejected shipment",
+        data: result.data
+      }, { status: result.status === "unknown" ? 502 : 422 });
+    }
+
+    return NextResponse.json({
+      success: true,
+      status: result.status,
+      trackingId: result.trackingId,
+      courierReference: result.courierReference,
+      courierName: result.courierName,
+      message: result.message,
+      data: result.data
+    }, { status: 200 });
   } catch (error) {
     return apiError(error);
   }

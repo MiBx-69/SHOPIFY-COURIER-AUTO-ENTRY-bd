@@ -3173,5 +3173,29 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
 - **Filter Sheet**: Slide-up bottom sheet with Date, Payment, Fulfillment, and Courier selectors.
 - **Dispatch Confirmation & Pickup Location Sheet**: Touch-friendly bottom sheet displaying order summary, courier picker, and pickup warehouse dropdown.
 
+---
+
+# 95. End-to-End Dispatch Architecture & Error Contract
+
+### 1. Robust Dispatch Contract & Non-200 Status Propagation
+- **Typed Dispatch Result**: `DispatchService.execute` returns a strongly typed `DispatchExecutionResult` (`success`, `status`, `trackingId`, `courierReference`, `courierName`, `error`, `data`).
+- **HTTP Status Code Alignment**:
+  - `200`: Definite courier shipment created (with `trackingId` and courier reference).
+  - `409`: Order cannot be claimed for dispatch / already in progress.
+  - `422`: Courier API validation failure or business rejection (includes detailed error message).
+  - `502`: Courier API network failure / upstream 5xx error.
+  - Failed dispatch requests **never return HTTP 200**.
+
+### 2. Idempotent Retry Support (`claim_dispatch` Migration)
+- Migration `20260826183000_fix_claim_dispatch_retry.sql`:
+  - If an order previously failed, calling `claim_dispatch` automatically resets `status = 'pending'`, clears `safe_error_message`, generates a new `idempotency_key`, and transitions `orders.dispatch_status = 'dispatching'`.
+  - Prevents retries from getting stuck in a dead state with stale idempotency keys.
+
+### 3. Transparent Failure Feedback in UI
+- **Single & Bulk Dispatch Responses**: Frontend directly inspects `res.ok && data.success`.
+- **Inline Error Badges**: When an order fails, the actual sanitized courier error message (`safe_error_message`) is rendered inline in both the desktop table and mobile order cards with tooltip support.
+- **Safe Structured Server Logging**: Structured server logs trace `[DISPATCH START]`, `[DISPATCH SUCCESS]`, and `[DISPATCH FAILED]` with attempt IDs while strictly redacting secrets and tokens.
+
+
 
 

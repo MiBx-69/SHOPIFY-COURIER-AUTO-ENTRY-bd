@@ -509,12 +509,24 @@ export function OrderList({
         })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to dispatch order");
-      setNotice({ text: `Order ${singleDispatchOrder.name} dispatched successfully!`, type: "success" });
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || "Failed to dispatch order");
+      }
+      const courierTag = data.courierName ? ` via ${data.courierName}` : "";
+      const trackingTag = data.trackingId ? ` (Tracking: ${data.trackingId})` : "";
+      setNotice({ 
+        text: `Order ${singleDispatchOrder.name} dispatched successfully${courierTag}!${trackingTag}`, 
+        type: "success" 
+      });
       loadOrders();
       loadCounts();
     } catch (err: unknown) {
-      setNotice({ text: err instanceof Error ? err.message : "Dispatch failed", type: "error" });
+      setNotice({ 
+        text: `Dispatch failed for ${singleDispatchOrder.name}: ${err instanceof Error ? err.message : "Courier rejected request"}`, 
+        type: "error" 
+      });
+      loadOrders();
+      loadCounts();
     } finally {
       setActionLoadingId(null);
       setSingleDispatchOrder(null);
@@ -1116,16 +1128,26 @@ export function OrderList({
                       {isSkipped ? (
                         <DispatchBadge status="SKIPPED" />
                       ) : (
-                        <DispatchBadge 
-                          status={order.dispatch_status} 
-                          tracking={tracking} 
-                          copied={copiedTracking === tracking}
-                          onCopy={(t) => {
-                            navigator.clipboard.writeText(t);
-                            setCopiedTracking(t);
-                            setTimeout(() => setCopiedTracking(null), 2000);
-                          }}
-                        />
+                        <div>
+                          <DispatchBadge 
+                            status={order.dispatch_status} 
+                            tracking={tracking} 
+                            copied={copiedTracking === tracking}
+                            onCopy={(t) => {
+                              navigator.clipboard.writeText(t);
+                              setCopiedTracking(t);
+                              setTimeout(() => setCopiedTracking(null), 2000);
+                            }}
+                          />
+                          {isFailed && dispatchRecord?.safe_error_message && (
+                            <span 
+                              className="text-[10px] text-red-600 block max-w-[170px] truncate mt-0.5 cursor-help font-medium" 
+                              title={dispatchRecord.safe_error_message}
+                            >
+                              ⚠ {dispatchRecord.safe_error_message}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </td>
 
@@ -1279,6 +1301,14 @@ export function OrderList({
                         <DispatchBadge size="sm" status={order.dispatch_status} tracking={tracking} />
                       )}
                       <span className="text-slate-400">{fmtShortDate(order.shopify_created_at || order.shopify_updated_at)}</span>
+                      {isFailed && dispatchRecord?.safe_error_message && (
+                        <span 
+                          className="text-[10px] text-red-600 font-medium block truncate max-w-[200px]"
+                          title={dispatchRecord.safe_error_message}
+                        >
+                          ⚠ {dispatchRecord.safe_error_message}
+                        </span>
+                      )}
                     </div>
 
                     {!isCancelled && (
