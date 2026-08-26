@@ -444,4 +444,4 @@ Thumbs.db
 
 # Local machine metadata
 .machine/
-.local/
+.local/test-sync.ts
