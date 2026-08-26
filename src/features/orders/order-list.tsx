@@ -327,7 +327,7 @@ export function OrderList({
         {totalCount > size && (
           <div className="flex items-center justify-between pt-4 pb-8">
             <Button 
-              variant="outline" 
+              variant="secondary" 
               disabled={page === 0 || loading} 
               onClick={() => setPage(p => Math.max(0, p - 1))}
             >
@@ -337,7 +337,7 @@ export function OrderList({
               Page {page + 1} of {Math.ceil(totalCount / size)}
             </span>
             <Button 
-              variant="outline" 
+              variant="secondary" 
               disabled={!hasNextPage || loading} 
               onClick={() => setPage(p => p + 1)}
             >
