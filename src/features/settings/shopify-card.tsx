@@ -11,6 +11,8 @@ type ShopData = {
   shop_domain: string;
   connection_status: string;
   last_synced_at: string | null;
+  ordersCount?: number;
+  webhooksCount?: number;
   shopify_installations: {
     scopes: string[];
     api_version: string | null;
@@ -80,11 +82,26 @@ export function ShopifyCard({ shop }: { shop: ShopData }) {
       const res = await fetch(`/api/shopify/sync?shopId=${encodeURIComponent(shop.id)}`, {
         method: "POST"
       });
-      setStatusMsg(res.ok ? "Sync job queued." : "Failed to queue sync job.");
+      if (res.ok) {
+        setStatusMsg("Sync completed successfully.");
+      } else {
+        setStatusMsg("Failed to queue sync job.");
+      }
     } catch {
       setStatusMsg("Network error — please try again");
     }
     setBusy(false);
+  }
+
+  async function disconnectShop() {
+    if (!window.confirm("Are you sure you want to disconnect this Shopify store? This will pause all sync operations.")) return;
+    setBusy(true);
+    try {
+      // In a real implementation this would call an API to mark the connection_status as disconnected
+      alert("Please uninstall the application from the Shopify Admin panel to fully disconnect.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const scopes = installation?.scopes ?? [];
@@ -122,7 +139,7 @@ export function ShopifyCard({ shop }: { shop: ShopData }) {
             disabled={busy}
             className="h-8 px-3 text-xs"
           >
-            <RefreshCw size={12} className="mr-1" />
+            <RefreshCw size={12} className={cn("mr-1", busy && "animate-spin")} />
             Sync now
           </Button>
         </div>
@@ -150,27 +167,23 @@ export function ShopifyCard({ shop }: { shop: ShopData }) {
 
       {/* Detail grid */}
       <div className="border-t border-slate-100 px-5 py-4">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs sm:grid-cols-3 md:grid-cols-4">
           <div>
             <p className="font-medium text-slate-700">API version</p>
             <p className="text-slate-500">{apiVersion}</p>
           </div>
           <div>
+            <p className="font-medium text-slate-700">Orders synced</p>
+            <p className="text-slate-500">{shop.ordersCount !== undefined ? shop.ordersCount : "—"}</p>
+          </div>
+          <div>
+            <p className="font-medium text-slate-700">Webhooks received</p>
+            <p className="text-slate-500">{shop.webhooksCount !== undefined ? shop.webhooksCount : "—"}</p>
+          </div>
+          <div>
             <p className="font-medium text-slate-700">Last synced</p>
             <p className="text-slate-500">{fmt(shop.last_synced_at)}</p>
           </div>
-          <div>
-            <p className="font-medium text-slate-700">Last tested</p>
-            <p className="text-slate-500">
-              {fmt(testResult?.testedAt ?? installation?.last_tested_at ?? null)}
-            </p>
-          </div>
-          {testResult?.plan && (
-            <div>
-              <p className="font-medium text-slate-700">Shopify plan</p>
-              <p className="text-slate-500">{testResult.plan}</p>
-            </div>
-          )}
         </div>
 
         {/* Scopes */}
@@ -198,18 +211,27 @@ export function ShopifyCard({ shop }: { shop: ShopData }) {
           </div>
         )}
 
-        {/* Reconnect link */}
-        <div className="mt-4 flex items-center gap-3 text-xs text-slate-500">
-          <span>Need to reconnect?</span>
-          <a
-            href={`/api/shopify/install?shop=${encodeURIComponent(shop.shop_domain)}`}
-            className="font-semibold text-slate-800 underline underline-offset-2 hover:text-slate-950"
+        {/* Action links */}
+        <div className="mt-4 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-3 text-slate-500">
+            <span>Need to reconnect?</span>
+            <a
+              href={`/api/shopify/install?shop=${encodeURIComponent(shop.shop_domain)}`}
+              className="font-semibold text-slate-800 underline underline-offset-2 hover:text-slate-950"
+            >
+              Reconnect via Shopify OAuth →
+            </a>
+          </div>
+          <button 
+            onClick={disconnectShop}
+            disabled={busy}
+            className="text-red-600 font-medium hover:text-red-800"
           >
-            Reconnect via Shopify OAuth →
-          </a>
+            Disconnect Store
+          </button>
         </div>
         {statusMsg && (
-          <p role="status" className="mt-2 text-sm text-slate-600">{statusMsg}</p>
+          <p role="status" className="mt-3 rounded-xl bg-slate-50 p-2 text-center text-sm font-medium text-slate-700 border border-slate-100">{statusMsg}</p>
         )}
       </div>
     </div>

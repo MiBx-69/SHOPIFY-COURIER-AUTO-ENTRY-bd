@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ShopifyCard } from "@/features/settings/shopify-card";
 import { ShopifyConnect } from "@/features/settings/shopify-connect";
 import { CourierSettings, type CourierConfig } from "@/features/settings/courier-settings";
+import { DispatchSettings } from "@/features/settings/dispatch-settings";
 import { IntegrationAuditLog } from "@/features/settings/integration-audit-log";
 
 export const metadata = { title: "Settings — Dispatch Platform" };
@@ -21,7 +22,7 @@ export default async function SettingsPage() {
   // Fetch shops this user belongs to (RLS on shops respects membership)
   const { data: shops } = await supabase
     .from("shops")
-    .select("id,name,shop_domain,connection_status,last_synced_at")
+    .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier")
     .limit(1);
 
   const shop = shops?.[0] ?? null;
@@ -42,6 +43,15 @@ export default async function SettingsPage() {
       .eq("shop_id", shop.id)
       .maybeSingle();
     installation = data;
+  }
+
+  let ordersCount = 0;
+  let webhooksCount = 0;
+  if (shop) {
+    const { count: oCount } = await admin.from("orders").select("id", { count: "exact", head: true }).eq("shop_id", shop.id);
+    const { count: wCount } = await admin.from("webhook_events").select("id", { count: "exact", head: true }).eq("shop_id", shop.id);
+    ordersCount = oCount || 0;
+    webhooksCount = wCount || 0;
   }
 
   // Fetch courier configs with health fields
@@ -68,7 +78,7 @@ export default async function SettingsPage() {
     .order("display_name");
 
   const shopWithInstallation = shop
-    ? { ...shop, shopify_installations: installation }
+    ? { ...shop, shopify_installations: installation, ordersCount, webhooksCount }
     : null;
 
   return (
@@ -101,6 +111,23 @@ export default async function SettingsPage() {
             </div>
           )}
         </section>
+        
+        {/* ── Dispatch Settings ──────────────────────────────────────────── */}
+        {shop && (
+          <section>
+            <div className="mb-3">
+              <h2 className="text-base font-bold text-slate-900">Dispatch settings</h2>
+              <p className="text-sm text-slate-500">
+                Configure how and when orders are sent to couriers.
+              </p>
+            </div>
+            <DispatchSettings 
+              shopId={shop.id}
+              initialAutomatic={Boolean(shop.automatic_courier)}
+              configs={courierConfigs as any} 
+            />
+          </section>
+        )}
 
         {/* ── Courier Integrations ───────────────────────────────────────── */}
         {shop && (
@@ -118,8 +145,6 @@ export default async function SettingsPage() {
             />
           </section>
         )}
-
-
 
         {/* ── Integration Audit Log ─────────────────────────────────────── */}
         {shop && (
