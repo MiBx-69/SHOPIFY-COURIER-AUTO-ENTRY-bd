@@ -26,7 +26,8 @@ const csp = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  // Vercel handles its own serverless bundling; forcing standalone breaks its trace generator
+  output: process.env.VERCEL ? undefined : "standalone",
   turbopack: { root: process.cwd() },
   poweredByHeader: false,
   experimental: { serverActions: { bodySizeLimit: "1mb" } },
