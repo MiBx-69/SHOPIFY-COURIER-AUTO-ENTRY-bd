@@ -7,8 +7,7 @@ import { money } from "@/lib/utils";
 import { 
   FulfillmentBadge, 
   PaymentBadge, 
-  DispatchBadge,
-  StatusBadge 
+  DispatchBadge
 } from "@/components/ui/status-badge";
 
 type DispatchAttempt = {
@@ -19,6 +18,8 @@ type DispatchAttempt = {
   safe_error_message: string | null;
   started_at: string;
   completed_at: string | null;
+  request_metadata?: Record<string, unknown>;
+  response_metadata?: Record<string, unknown>;
 };
 
 type OrderEvent = {
