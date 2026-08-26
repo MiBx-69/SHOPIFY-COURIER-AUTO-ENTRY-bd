@@ -164,12 +164,6 @@ function CourierCard({
     }
   };
 
-  useEffect(() => {
-    if (expanded && hasCredentials) {
-      loadPickupLocations();
-    }
-  }, [expanded, hasCredentials, loadPickupLocations]);
-
   // ── API helpers ───────────────────────────────────────────────────────────
 
   async function testConnection() {
@@ -302,8 +296,14 @@ function CourierCard({
             </Button>
           )}
           <button
-            onClick={() => setExpanded((v) => !v)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
+            onClick={() => {
+              const next = !expanded;
+              setExpanded(next);
+              if (next && hasCredentials) {
+                loadPickupLocations();
+              }
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 cursor-pointer"
             aria-label={expanded ? "Collapse" : "Expand"}
           >
             {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -375,8 +375,7 @@ function CourierCard({
                   </h4>
                 </div>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
                   onClick={syncPickupLocations}
                   disabled={syncingLocations}
                   className="h-7 text-[11px] px-2.5 gap-1.5"
@@ -648,7 +647,7 @@ function EmptyCourierCard({
         </div>
         {!configuring && (
           <Button
-            variant="outline"
+            variant="secondary"
             onClick={() => setConfiguring(true)}
             className="h-8 px-3 text-xs"
           >
