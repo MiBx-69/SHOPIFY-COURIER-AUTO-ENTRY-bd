@@ -137,11 +137,6 @@ export function OrderList({
     }
   }
 
-  // Reset page when filter, search, or pageSize changes
-  useEffect(() => {
-    setPage(0);
-  }, [shopId, filter, search, pageSize]);
-
   // Fetch when page, filter, search, pageSize, or shopId changes
   useEffect(() => {
     const timer = window.setTimeout(load, search ? 250 : 0);
@@ -159,6 +154,21 @@ export function OrderList({
       createClient().removeChannel(channel);
     };
   }, [shopId]);
+
+  function handleSearchChange(val: string) {
+    setSearch(val);
+    setPage(0);
+  }
+
+  function handleFilterChange(f: string) {
+    setFilter(f);
+    setPage(0);
+  }
+
+  function handlePageSizeChange(size: number) {
+    setPageSize(size);
+    setPage(0);
+  }
 
   async function dispatchSingle(orderId: string, courierConfigId?: string) {
     if (!window.confirm("Confirm dispatch? A courier shipment will be created.")) return;
@@ -263,13 +273,13 @@ export function OrderList({
             <input
               type="text"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Search orders by number, customer, phone, email, SKU, tracking..."
               className="h-8.5 w-full rounded-md border border-slate-200 bg-slate-50/50 pl-8 pr-7 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
             />
             {search && (
               <button 
-                onClick={() => setSearch("")} 
+                onClick={() => handleSearchChange("")} 
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
                 <X size={13} />
@@ -295,7 +305,7 @@ export function OrderList({
               return (
                 <button
                   key={f.id}
-                  onClick={() => setFilter(f.id)}
+                  onClick={() => handleFilterChange(f.id)}
                   className={cn(
                     "h-6.5 px-2.5 rounded text-[11px] font-medium transition-colors whitespace-nowrap",
                     active
@@ -532,7 +542,7 @@ export function OrderList({
                             <button
                               onClick={() => copyTrackingToClipboard(tracking)}
                               title="Click to copy tracking ID"
-                              className="group flex items-center gap-1 font-mono text-[10px] text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors"
+                              className="group flex items-center gap-1 font-mono text-[10px] text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded transition-colors cursor-pointer"
                             >
                               <span>{tracking}</span>
                               {copiedTracking === tracking ? (
@@ -589,7 +599,7 @@ export function OrderList({
                           <button
                             onClick={() => dispatchSingle(order.id)}
                             disabled={dispatchingId === order.id}
-                            className="h-6.5 px-2.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50 shadow-2xs"
+                            className="h-6.5 px-2.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50 shadow-2xs cursor-pointer"
                           >
                             {dispatchingId === order.id ? (
                               <RefreshCw size={11} className="animate-spin" />
@@ -783,7 +793,7 @@ export function OrderList({
           <span>Per page:</span>
           <select
             value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
+            onChange={(e) => handlePageSizeChange(Number(e.target.value))}
             className="h-7 rounded border border-slate-200 bg-slate-50/50 px-2 text-xs font-medium text-slate-800 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"
           >
             {PAGE_SIZES.map(s => (

@@ -1,23 +1,15 @@
 "use client";
 import Script from "next/script";
-import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 export function AppBridgeProvider() {
   const searchParams = useSearchParams();
-  const [isEmbedded, setIsEmbedded] = useState(false);
+  const embeddedParam = searchParams.get("embedded") === "1";
+  const inIframe = typeof window !== "undefined" && window.top !== window.self;
 
-  useEffect(() => {
-    const embeddedParam = searchParams.get("embedded") === "1";
-    const inIframe = window.top !== window.self;
-    if (embeddedParam || inIframe) {
-      setIsEmbedded(true);
-    }
-  }, [searchParams]);
+  if (!embeddedParam && !inIframe) return null;
 
-  if (!isEmbedded) return null;
-
-  // We need to provide the shop API key or host. But App Bridge v4 automatically infers host from URL params.
+  // App Bridge v4 automatically infers host and client from URL params.
   return (
     <Script 
       src="https://cdn.shopify.com/shopifycloud/app-bridge.js" 
