@@ -336,10 +336,11 @@ export function OrderList({
       loadOrders();
       loadCounts();
       loadSavedFilters();
+      loadCourierPickupLocations();
       updateUrl(tab, filterDate, search);
     }, search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [loadOrders, loadCounts, loadSavedFilters, updateUrl, tab, filterDate, search]);
+  }, [loadOrders, loadCounts, loadSavedFilters, loadCourierPickupLocations, updateUrl, tab, filterDate, search]);
 
   // Realtime updates
   useEffect(() => {
@@ -476,36 +477,59 @@ export function OrderList({
   }
 
   // ─── ACTIONS ON SINGLE ORDERS ───
-  async function handleSingleDispatch(orderId: string) {
-    if (!window.confirm("Confirm dispatch? A courier shipment will be created.")) return;
-    setActionLoadingId(orderId);
-    setNotice({ text: "Dispatching order…", type: "info" });
+  const getLocationsForCourier = useCallback((configId?: string) => {
+    if (configId && courierPickupMap[configId]) {
+      return courierPickupMap[configId];
+    }
+    const firstKey = Object.keys(courierPickupMap)[0];
+    return firstKey ? courierPickupMap[firstKey] : null;
+  }, [courierPickupMap]);
+
+  function openSingleDispatchModal(order: Order) {
+    const courierId = selectedCouriers[order.id] || "";
+    setSingleDispatchOrder(order);
+    setSingleDispatchCourierId(courierId);
+    const locData = getLocationsForCourier(courierId);
+    setSingleDispatchPickupLocationId(locData?.defaultLocationId || locData?.locations[0]?.id || "");
+  }
+
+  async function confirmSingleDispatch() {
+    if (!singleDispatchOrder) return;
+    setActionLoadingId(singleDispatchOrder.id);
     try {
       const response = await fetch("/api/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          orderId, 
-          courierConfigId: selectedCouriers[orderId], 
+          orderId: singleDispatchOrder.id, 
+          courierConfigId: singleDispatchCourierId || undefined,
+          pickupLocationId: singleDispatchPickupLocationId || undefined,
           idempotencyKey: crypto.randomUUID() 
         })
       });
       const body = await response.json();
       if (response.ok) {
         setNotice({ 
-          text: `Order dispatched! Tracking: ${body.data?.tracking_id || "Generated"}`, 
+          text: `Order ${singleDispatchOrder.name} dispatched! Tracking: ${body.data?.tracking_id || "Generated"}`, 
           type: "success" 
         });
+        setSingleDispatchOrder(null);
         loadOrders();
         loadCounts();
       } else {
-        setNotice({ text: body.error || "Dispatch failed", type: "error" });
+        alert(body.error || "Dispatch failed");
       }
     } catch {
-      setNotice({ text: "Network error during dispatch.", type: "error" });
+      alert("Network error during dispatch.");
     } finally {
       setActionLoadingId(null);
     }
+  }
+
+  function openBulkDispatchModal() {
+    setShowDispatchModal(true);
+    const locData = getLocationsForCourier(bulkCourierId);
+    setBulkPickupLocationId(locData?.defaultLocationId || locData?.locations[0]?.id || "");
   }
 
   async function handleSingleSkip(orderId: string) {
@@ -581,7 +605,8 @@ export function OrderList({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           orderIds: orderIdsToDispatch,
-          courierConfigId: bulkCourierId || undefined
+          courierConfigId: bulkCourierId || undefined,
+          pickupLocationId: bulkPickupLocationId || undefined
         })
       });
       const resJson = await response.json();
@@ -892,10 +917,7 @@ export function OrderList({
                 </Button>
 
                 <Button 
-                  onClick={() => {
-                    setBulkCourierId("");
-                    setShowDispatchModal(true);
-                  }}
+                  onClick={openBulkDispatchModal}
                   className="h-7 px-3 text-xs bg-white text-slate-900 hover:bg-slate-100 font-semibold shadow-2xs rounded transition-all cursor-pointer flex items-center gap-1.5"
                 >
                   <Truck size={13} />
@@ -1128,7 +1150,7 @@ export function OrderList({
                           </button>
 
                           <button
-                            onClick={() => handleSingleDispatch(order.id)}
+                            onClick={() => openSingleDispatchModal(order)}
                             disabled={actionLoadingId === order.id}
                             className={cn(
                               "h-6.5 px-2.5 rounded text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50 shadow-2xs cursor-pointer",
@@ -1246,7 +1268,7 @@ export function OrderList({
                           </button>
                         ) : (
                           <button
-                            onClick={() => handleSingleDispatch(order.id)}
+                            onClick={() => openSingleDispatchModal(order)}
                             disabled={actionLoadingId === order.id}
                             className="h-6 px-2 rounded bg-slate-900 text-white text-[10px] font-medium inline-flex items-center gap-1 disabled:opacity-50"
                           >
@@ -1496,6 +1518,134 @@ export function OrderList({
         </div>
       )}
 
+      {/* ─── 8.5 SINGLE ORDER DISPATCH CONFIRMATION MODAL ─── */}
+      {singleDispatchOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-5 shadow-xl text-slate-900 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="flex size-7 items-center justify-center rounded bg-slate-900 text-white text-xs font-bold font-mono">
+                  {singleDispatchOrder.name}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Dispatch Order {singleDispatchOrder.name}</h3>
+                  <p className="text-xs text-slate-500">{singleDispatchOrder.customer_name || "Customer"}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSingleDispatchOrder(null)} 
+                disabled={Boolean(actionLoadingId)} 
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              {/* Order Summary */}
+              <div className="rounded-lg bg-slate-50 p-3 border border-slate-200/80 flex items-center justify-between">
+                <div>
+                  <span className="font-semibold text-slate-800">{singleDispatchOrder.customer_name || "Customer"}</span>
+                  <p className="text-slate-500 text-[11px]">{singleDispatchOrder.customer_phone}</p>
+                </div>
+                <div className="text-right">
+                  <span className="font-bold text-sm text-slate-900">{money(singleDispatchOrder.total_minor, singleDispatchOrder.currency)}</span>
+                  <p className="text-slate-500 text-[11px]">
+                    {(singleDispatchOrder.order_line_items || []).reduce((n, i) => n + (i.quantity || 1), 0)} item{((singleDispatchOrder.order_line_items || []).reduce((n, i) => n + (i.quantity || 1), 0)) !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              </div>
+
+              {/* Courier Selection */}
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Courier</label>
+                <select
+                  value={singleDispatchCourierId}
+                  onChange={(e) => {
+                    const newCId = e.target.value;
+                    setSingleDispatchCourierId(newCId);
+                    const locs = getLocationsForCourier(newCId);
+                    setSingleDispatchPickupLocationId(locs?.defaultLocationId || locs?.locations[0]?.id || "");
+                  }}
+                  className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-xs bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                >
+                  <option value="">Automatic Priority Fallback</option>
+                  {availableCouriers.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Pickup Location Selection */}
+              {(() => {
+                const locData = getLocationsForCourier(singleDispatchCourierId);
+                const locations = locData?.locations || [];
+                const selectedLoc = locations.find((l) => l.id === singleDispatchPickupLocationId || l.courierLocationId === singleDispatchPickupLocationId);
+
+                if (locations.length === 0) {
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 space-y-1">
+                      <p className="font-semibold">No pickup location is configured for {locData?.courierName || "this courier"}.</p>
+                      <p className="text-[11px]">Please configure and refresh pickup locations in Settings before dispatching.</p>
+                      <Link href="/settings" className="inline-block mt-1 font-bold text-[11px] underline hover:text-amber-950">
+                        Configure Courier Locations →
+                      </Link>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-1.5">
+                    <label className="font-semibold text-slate-700 block">Pickup Location</label>
+                    <select
+                      value={singleDispatchPickupLocationId}
+                      onChange={(e) => setSingleDispatchPickupLocationId(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-xs bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 font-medium"
+                    >
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name} {loc.id === locData?.defaultLocationId ? "(Default)" : ""} — {loc.address}
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedLoc && (
+                      <div className="rounded-lg bg-slate-50 p-2.5 border border-slate-200/70 text-[11px] text-slate-600 flex items-start gap-2">
+                        <MapPin size={13} className="text-slate-500 mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <strong className="text-slate-900 block truncate">{selectedLoc.name}</strong>
+                          <span className="line-clamp-2">{selectedLoc.address}</span>
+                          {selectedLoc.phone && <span className="block text-slate-400 mt-0.5">Phone: {selectedLoc.phone}</span>}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
+              <Button
+                variant="secondary"
+                disabled={Boolean(actionLoadingId)}
+                onClick={() => setSingleDispatchOrder(null)}
+                className="h-8 px-3 text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={Boolean(actionLoadingId) || (getLocationsForCourier(singleDispatchCourierId)?.locations.length ?? 0) === 0}
+                onClick={confirmSingleDispatch}
+                className="h-8 px-4 text-xs bg-slate-900 hover:bg-slate-800 text-white font-medium flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {actionLoadingId ? <RefreshCw size={12} className="animate-spin" /> : <Truck size={12} />}
+                <span>Confirm Dispatch</span>
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── 9. BULK DISPATCH CONFIRMATION MODAL ─── */}
       {showDispatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs animate-in fade-in">
@@ -1510,12 +1660,12 @@ export function OrderList({
                   <p className="text-xs text-slate-500">{selected.length} orders selected for review</p>
                 </div>
               </div>
-              <button onClick={() => setShowDispatchModal(false)} disabled={batchProcessing} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setShowDispatchModal(false)} disabled={batchProcessing} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X size={16} />
               </button>
             </div>
 
-            <div className="space-y-2.5 text-xs">
+            <div className="space-y-3 text-xs">
               <div className="grid grid-cols-2 gap-2 text-center">
                 <div className="rounded-lg bg-emerald-50 p-2.5 border border-emerald-100">
                   <span className="text-[11px] font-semibold text-emerald-800 block">Ready to Dispatch</span>
@@ -1542,7 +1692,11 @@ export function OrderList({
                       name="bulkCourier"
                       value=""
                       checked={bulkCourierId === ""}
-                      onChange={() => setBulkCourierId("")}
+                      onChange={() => {
+                        setBulkCourierId("");
+                        const locs = getLocationsForCourier("");
+                        setBulkPickupLocationId(locs?.defaultLocationId || locs?.locations[0]?.id || "");
+                      }}
                       className="size-3.5 text-slate-900"
                     />
                     <span className="font-medium text-slate-800">Automatic Priority Fallback</span>
@@ -1554,7 +1708,11 @@ export function OrderList({
                         name="bulkCourier"
                         value={c.id}
                         checked={bulkCourierId === c.id}
-                        onChange={() => setBulkCourierId(c.id)}
+                        onChange={() => {
+                          setBulkCourierId(c.id);
+                          const locs = getLocationsForCourier(c.id);
+                          setBulkPickupLocationId(locs?.defaultLocationId || locs?.locations[0]?.id || "");
+                        }}
                         className="size-3.5 text-slate-900"
                       />
                       <span className="font-medium text-slate-800">{c.name}</span>
@@ -1562,6 +1720,52 @@ export function OrderList({
                   ))}
                 </div>
               </div>
+
+              {/* Pickup Location Selection for Bulk */}
+              {(() => {
+                const locData = getLocationsForCourier(bulkCourierId);
+                const locations = locData?.locations || [];
+                const selectedLoc = locations.find((l) => l.id === bulkPickupLocationId || l.courierLocationId === bulkPickupLocationId);
+
+                if (locations.length === 0) {
+                  return (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800 space-y-1">
+                      <p className="font-semibold">No pickup location is configured for {locData?.courierName || "this courier"}.</p>
+                      <p className="text-[11px]">Please configure and refresh pickup locations in Settings before bulk dispatching.</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="font-semibold text-slate-800 block">Pickup Location (Applies to all {dispatchValidation.ready.length} orders)</label>
+                      <span className="text-[10px] text-slate-400 font-medium">Batch Origination</span>
+                    </div>
+                    <select
+                      value={bulkPickupLocationId}
+                      onChange={(e) => setBulkPickupLocationId(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-xs bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-900 font-medium"
+                    >
+                      {locations.map((loc) => (
+                        <option key={loc.id} value={loc.id}>
+                          {loc.name} {loc.id === locData?.defaultLocationId ? "(Default)" : ""} — {loc.address}
+                        </option>
+                      ))}
+                    </select>
+
+                    {selectedLoc && (
+                      <div className="rounded bg-slate-50 p-2 text-[11px] text-slate-600 flex items-start gap-2 border border-slate-200/60">
+                        <MapPin size={13} className="text-slate-500 mt-0.5 shrink-0" />
+                        <div className="min-w-0">
+                          <strong className="text-slate-900 block truncate">{selectedLoc.name}</strong>
+                          <span className="line-clamp-1">{selectedLoc.address}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-3">
@@ -1569,9 +1773,9 @@ export function OrderList({
                 Cancel
               </Button>
               <Button
-                disabled={batchProcessing || dispatchValidation.ready.length === 0}
+                disabled={batchProcessing || dispatchValidation.ready.length === 0 || (getLocationsForCourier(bulkCourierId)?.locations.length ?? 0) === 0}
                 onClick={() => executeBulkDispatch(dispatchValidation.ready.map((o) => o.id))}
-                className="h-8 px-4 text-xs bg-slate-900 hover:bg-slate-800 text-white font-medium flex items-center gap-1.5 shadow-xs"
+                className="h-8 px-4 text-xs bg-slate-900 hover:bg-slate-800 text-white font-medium flex items-center gap-1.5 shadow-xs cursor-pointer disabled:opacity-50"
               >
                 {batchProcessing ? <RefreshCw size={12} className="animate-spin" /> : <Truck size={12} />}
                 <span>Dispatch {dispatchValidation.ready.length} Ready Orders</span>
