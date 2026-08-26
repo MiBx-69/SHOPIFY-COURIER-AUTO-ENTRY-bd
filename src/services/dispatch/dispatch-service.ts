@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/crypto";
 import { courierRegistry } from "@/services/courier/registry";
 import { selectCourier } from "@/services/courier/selector";
+import { PickupLocationService } from "@/services/courier/pickup-locations";
 import { updateShopifyDispatchMetafields, createShopifyFulfillment } from "@/services/shopify/client";
 import type { NormalizedShipment } from "@/types/domain";
 
@@ -10,16 +11,33 @@ function address(value: Record<string, string>) {
 }
 
 export class DispatchService {
-  async execute(dispatchId: string, requestedConfigId?: string) {
+  async execute(dispatchId: string, requestedConfigId?: string, requestedPickupLocationId?: string, actorId?: string) {
     const admin = createAdminClient();
     const { data: dispatch, error } = await admin.from("dispatches").select("*,orders(*,order_line_items(*))").eq("id", dispatchId).single();
     if (error || !dispatch) throw new Error("Dispatch not found");
     if (dispatch.status === "dispatched") return dispatch;
     const order = dispatch.orders as Record<string, unknown>;
     if (!order.customer_phone || !order.shipping_address || order.cancelled_at) return this.fail(dispatch, "Order is not eligible for dispatch");
-    const { data: configs } = await admin.from("courier_configs").select("id,priority,enabled,connection_status,couriers(provider)").eq("shop_id", dispatch.shop_id);
+    const { data: configs } = await admin.from("courier_configs").select("id,priority,enabled,connection_status,couriers(provider,display_name)").eq("shop_id", dispatch.shop_id);
     const candidates = (configs || []).map((item) => ({ ...item, provider: (item.couriers as unknown as { provider: "redx"|"pathao"|"steadfast" }).provider }));
     const selected = selectCourier(candidates, requestedConfigId);
+
+    // Fetch pickup locations for selected courier
+    const locationsData = await PickupLocationService.get(selected.id, dispatch.shop_id, actorId || dispatch.created_by || "system");
+    const availableLocations = locationsData.locations || [];
+
+    if (availableLocations.length === 0) {
+      const courierMeta = (configs || []).find((c) => c.id === selected.id)?.couriers as { display_name: string } | undefined;
+      const courierName = courierMeta?.display_name || selected.provider.toUpperCase();
+      return this.fail(dispatch, `No pickup location is configured for ${courierName}. Please configure pickup locations in Settings.`);
+    }
+
+    // Resolve location
+    let chosenLocation = availableLocations.find((l) => l.id === requestedPickupLocationId || l.courierLocationId === requestedPickupLocationId);
+    if (!chosenLocation) {
+      chosenLocation = availableLocations.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || availableLocations[0];
+    }
+
     const { data: secret, error: secretError } = await admin.from("courier_secrets").select("ciphertext,iv,auth_tag").eq("courier_config_id", selected.id).single();
     if (secretError || !secret) return this.fail(dispatch, "Courier credentials are unavailable");
     const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
@@ -36,6 +54,10 @@ export class DispatchService {
       postalCode: (order.shipping_address as Record<string, string>).zip,
       codAmount: Number(order.total_minor) / 100,
       notes: order.note ? String(order.note) : undefined,
+      pickupLocationId: chosenLocation.courierLocationId || chosenLocation.id,
+      pickupLocationName: chosenLocation.name,
+      pickupAddress: chosenLocation.address,
+      pickupPhone: chosenLocation.phone,
       items: items.map((item) => ({
         productName: String(item.title),
         variant: item.variant_title ? String(item.variant_title) : undefined,
@@ -44,13 +66,20 @@ export class DispatchService {
         price: Number(item.unit_price_minor) / 100
       }))
     };
+
     const provider = courierRegistry.get(selected.provider);
     const attempt = await admin.from("dispatch_attempts").insert({
       dispatch_id: dispatch.id,
       shop_id: dispatch.shop_id,
       provider: selected.provider,
       idempotency_key: dispatch.idempotency_key,
-      status: "started"
+      status: "started",
+      request_metadata: {
+        pickup_location_id: chosenLocation.id,
+        pickup_location_name: chosenLocation.name,
+        pickup_address: chosenLocation.address,
+        pickup_phone: chosenLocation.phone
+      }
     }).select().single();
 
     const result = await provider.createShipment(payload, credentials, dispatch.idempotency_key);
@@ -96,6 +125,23 @@ export class DispatchService {
     }).eq("id", dispatch.id);
 
     await admin.from("orders").update({ dispatch_status: "dispatched" }).eq("id", dispatch.order_id);
+
+    // Record permanent order event with pickup location details
+    await admin.from("order_events").insert({
+      shop_id: dispatch.shop_id,
+      order_id: dispatch.order_id,
+      event_type: "order_dispatched",
+      payload: {
+        provider: selected.provider,
+        tracking_id: result.trackingId,
+        courier_reference: result.courierReference,
+        pickup_location_id: chosenLocation.id,
+        pickup_location_name: chosenLocation.name,
+        pickup_address: chosenLocation.address,
+        pickup_phone: chosenLocation.phone,
+        dispatched_at: new Date().toISOString()
+      }
+    });
 
     try { 
       await updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), {
