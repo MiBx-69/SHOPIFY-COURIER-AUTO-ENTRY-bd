@@ -87,7 +87,7 @@ export function DispatchSettings({
           <p className="font-semibold text-slate-900">Automatic Courier Selection</p>
           <p className="text-sm text-slate-500">Automatically select the highest priority enabled courier when dispatching.</p>
         </div>
-        <Button onClick={toggleAutomatic} disabled={busy} variant={automatic ? "default" : "secondary"}>
+        <Button onClick={toggleAutomatic} disabled={busy} variant={automatic ? "primary" : "secondary"}>
           {busy && <Loader2 size={14} className="mr-2 animate-spin" />}
           {automatic ? "ON" : "OFF"}
         </Button>
