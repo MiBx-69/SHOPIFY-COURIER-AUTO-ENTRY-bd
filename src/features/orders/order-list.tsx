@@ -212,21 +212,6 @@ export function OrderList({
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
-  // Keep selected order objects in cache for cross-page operations
-  useEffect(() => {
-    if (orders.length > 0) {
-      setSelectedOrderCache((prev) => {
-        const next = new Map(prev);
-        orders.forEach((o) => {
-          if (selectedSet.has(o.id)) {
-            next.set(o.id, o);
-          }
-        });
-        return next;
-      });
-    }
-  }, [orders, selectedSet]);
-
   // Active filter count
   const activeFiltersCount = useMemo(() => {
     let cnt = 0;
@@ -255,7 +240,7 @@ export function OrderList({
   }, [filterPayment, filterCourier, filterMinAmount, filterMaxAmount]);
 
   // Load Tab Counts
-  async function loadCounts() {
+  const loadCounts = useCallback(async () => {
     try {
       const res = await fetch(`/api/orders/counts?shopId=${shopId}`);
       if (res.ok) {
@@ -265,10 +250,10 @@ export function OrderList({
     } catch {
       // Non-blocking
     }
-  }
+  }, [shopId]);
 
   // Load Saved Filters
-  async function loadSavedFilters() {
+  const loadSavedFilters = useCallback(async () => {
     try {
       const res = await fetch(`/api/saved-filters?shopId=${shopId}`);
       if (res.ok) {
@@ -278,10 +263,10 @@ export function OrderList({
     } catch {
       // Non-blocking
     }
-  }
+  }, [shopId]);
 
   // Load Orders
-  async function loadOrders() {
+  const loadOrders = useCallback(async () => {
     setLoading(true);
     setError(undefined);
     try {
@@ -304,27 +289,35 @@ export function OrderList({
       const response = await fetch(`/api/orders?${params}`);
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Failed to load orders");
-      setOrders(body.data || []);
+      const loaded: Order[] = body.data || [];
+      setOrders(loaded);
       setTotalCount(body.count || 0);
+
+      setSelectedOrderCache((prev) => {
+        const next = new Map(prev);
+        loaded.forEach((o) => {
+          if (selectedSet.has(o.id)) {
+            next.set(o.id, o);
+          }
+        });
+        return next;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    loadCounts();
-    loadSavedFilters();
-  }, [shopId]);
+  }, [shopId, tab, search, page, pageSize, filterDate, filterStartDate, filterEndDate, filterPayment, filterFulfillment, filterCourier, filterMinAmount, filterMaxAmount, selectedSet]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       loadOrders();
+      loadCounts();
+      loadSavedFilters();
       updateUrl(tab, filterDate, search);
     }, search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [shopId, tab, filterDate, filterPayment, filterFulfillment, filterCourier, filterMinAmount, filterMaxAmount, search, page, pageSize]);
+  }, [loadOrders, loadCounts, loadSavedFilters, updateUrl, tab, filterDate, search]);
 
   // Realtime updates
   useEffect(() => {
@@ -1057,7 +1050,7 @@ export function OrderList({
                     {/* Dispatch Status Badge */}
                     <td className="px-2.5 py-1.5 whitespace-nowrap">
                       {isSkipped ? (
-                        <StatusBadge label="Skipped" color="slate" dot />
+                        <DispatchBadge status="SKIPPED" />
                       ) : (
                         <DispatchBadge 
                           status={order.dispatch_status} 
@@ -1206,7 +1199,7 @@ export function OrderList({
                       <FulfillmentBadge size="sm" short status={fulfillmentStatus} />
                       <PaymentBadge size="sm" short status={order.financial_status} />
                       {isSkipped ? (
-                        <StatusBadge size="sm" label="Skipped" color="slate" dot />
+                        <DispatchBadge size="sm" status="SKIPPED" />
                       ) : (
                         <DispatchBadge size="sm" status={order.dispatch_status} tracking={tracking} />
                       )}

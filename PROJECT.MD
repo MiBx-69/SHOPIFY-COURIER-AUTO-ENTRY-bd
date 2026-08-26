@@ -2977,8 +2977,73 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
 ## 36. Updates (Aug 2026)
 - Shopify Sync has been repaired to perform initial reconciliation properly.
 - Courier Credentials are now managed completely within the UI and securely encrypted into courier_secrets without requiring environment variables.
-- Dispatch logic correctly processes utomatic_courier preference and priority drag-and-drop ordering.
+- Dispatch logic correctly processes  utomatic_courier preference and priority drag-and-drop ordering.
 - Shopify App Bridge is conditionally rendered only in embedded mode.
 - Idempotency locks are fully implemented for Shopify dispatch.
 
 - Shopify Sync API Breaking Changes Fix: Removed obsolete `orderNumber` field and restricted `customer` field from GraphQL initialSync, replacing them with compliant alternatives, allowing order ingestion to succeed.
+
+---
+
+# 91. Advanced Order Management & Dispatch System (Aug 2026 Enhancement)
+
+### 1. Ready to Dispatch Primary Queue
+- **Default Operational Tab**: Orders dashboard defaults to the `Ready to Dispatch` queue.
+- **Criteria**: Orders must have `cancelled_at IS NULL`, `fulfillment_status != 'FULFILLED'`, `dispatch_status NOT IN ('dispatched', 'cancelled')`, valid customer phone, and valid delivery address.
+- **Cancelled Order Isolation**: Cancelled Shopify orders are strictly excluded from Unfulfilled, Pending, Ready to Dispatch, and Bulk operations. They appear strictly in the `Cancelled` or `All` views.
+
+### 2. "Remove from Dispatch" (Skip) & "Restore to Dispatch"
+- **Operational Intent**: Staff can exclude eligible orders from the active dispatch queue (e.g. pending customer confirmation or fraud review) without deleting, cancelling, or altering the Shopify order.
+- **Mechanism**:
+  - `POST /api/orders/skip`: Records `dispatch_skipped` event with reason, timestamp, and actor in `order_events`. Order vanishes from active queues and appears in `Skipped`.
+  - `POST /api/orders/restore`: Records `dispatch_restored` event and returns order to `not_dispatched`, restoring it to the active queue.
+  - **Shopify Safety**: Neither action ever modifies Shopify order data or tags.
+
+### 3. Courier Dispatch Cancellation
+- **Operational Intent**: Cancel application courier dispatches for orders that are `dispatching` or `dispatched` without cancelling the merchant's Shopify order.
+- **Mechanism**:
+  - `POST /api/dispatch/cancel`:
+    - If a courier shipment exists, invokes provider `cancelShipment(trackingId, credentials)` via API (supported by REDX and Pathao).
+    - If the courier does not support online cancellation (e.g. Steadfast), the system returns an informative notice: `"Courier cancellation is not supported for this shipment."` rather than falsely marking it cancelled.
+    - If cancelled, updates `dispatches` and `orders` to `cancelled`, and logs an event in `order_events`.
+
+### 4. Application Dispatch State Machine
+- **Application Dispatch States**:
+  - `not_dispatched`: Initial synchronized state.
+  - `dispatching`: Atomically claimed for processing.
+  - `dispatched`: Successfully created with courier tracking.
+  - `failed`: Courier API or validation error.
+  - `skipped`: Excluded from active queue by staff.
+  - `cancel_requested` / `cancelled`: Dispatch stopped or cancelled with courier.
+- **Courier Provider Statuses**:
+  - `created`, `picked_up`, `in_transit`, `delivered`, `returned`, `cancelled`, `unknown`.
+
+### 5. Server-Side Filtering Engine
+- **Date Presets & Custom Range**:
+  - Shortcuts: `Today`, `Yesterday`, `7 Days`, `30 Days`, `This Month`, `Last Month`.
+  - Custom range with ISO `From` / `To` date pickers.
+  - Filtered server-side on `shopify_created_at` or `shopify_updated_at`.
+- **Payment Filter**: `Paid`, `Pending / COD`, `Partially Paid`, `Refunded`, `Voided`.
+- **Fulfillment Filter**: `Unfulfilled`, `Fulfilled`, `Partially Fulfilled`, `On Hold`, `Cancelled`.
+- **Courier Filter**: `All Couriers`, `REDX`, `Pathao`, `Steadfast`, `No Courier`.
+- **Amount Range**: Min and Max amount in BDT (filtered on `total_minor` in SQL).
+- **Attention Required Queue**: Aggregates orders with failed dispatches, missing customer phone numbers, or empty addresses in one place for warehouse staff.
+
+### 6. Saved Filters (Tenant-Isolated)
+- Users can name and save custom filter combinations (e.g., "Today's COD High Value", "Failed Dispatches").
+- Persisted in `saved_filters` with strict Row-Level Security ensuring zero cross-tenant visibility.
+
+### 7. Smart Multi-Select & Batch Actions
+- **Smart Page-Scoped Selection**: Selecting "All" on page only checks orders eligible for the current view's action.
+- **Bulk Dispatch**: Pre-dispatch validation sheet (ready vs attention counts, estimated COD total) + batch courier execution with per-order failure containment.
+- **Bulk Remove**: Batch skip with optional reason.
+- **Bulk Restore**: Restores selected skipped orders to active queue in a single click.
+- **Bulk Cancel Dispatch**: Batch cancellation with courier API calls and detailed summary (`✓ X cancelled`, `⚠ Y unsupported`, `✕ Z failed`).
+
+### 8. Order Details Activity Timeline & Dispatch History
+- **Activity Timeline**: Full chronological trail of order creation, synchronization, skip/restore actions, courier dispatch attempts, and status changes.
+- **Dispatch History**: Complete record of all attempts stored in `dispatch_attempts` with timestamps, providers, error codes, and responses.
+
+### 9. Filter Counts & URL State Synchronization
+- Server-side parallel count endpoint (`/api/orders/counts`) providing accurate real-time numbers for all tabs.
+- Active tabs, search, and date filters synchronized to URL query parameters (`/orders?tab=ready&date=today`).

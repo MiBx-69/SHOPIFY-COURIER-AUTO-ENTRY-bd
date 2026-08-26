@@ -213,6 +213,16 @@ const dispatchConfigs: Record<string, BadgeConfig> = {
     label: "Failed",
     className: "bg-rose-50 text-rose-700 border-rose-200/80",
     dot: "bg-rose-500"
+  },
+  SKIPPED: {
+    label: "Skipped",
+    className: "bg-slate-100 text-slate-600 border-slate-200/80",
+    dot: "bg-slate-400"
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    className: "bg-red-50 text-red-700 border-red-200/80",
+    dot: "bg-red-500"
   }
 };
 
