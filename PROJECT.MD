@@ -2980,3 +2980,5 @@ Never sacrifice tenant isolation or dispatch correctness for UI convenience.
 - Dispatch logic correctly processes utomatic_courier preference and priority drag-and-drop ordering.
 - Shopify App Bridge is conditionally rendered only in embedded mode.
 - Idempotency locks are fully implemented for Shopify dispatch.
+
+- Shopify Sync API Breaking Changes Fix: Removed obsolete `orderNumber` field and restricted `customer` field from GraphQL initialSync, replacing them with compliant alternatives, allowing order ingestion to succeed.
