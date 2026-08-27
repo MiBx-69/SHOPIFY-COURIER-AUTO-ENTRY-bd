@@ -3,6 +3,7 @@ import { apiError, currentUser } from "@/lib/api/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bulkDispatchSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
+import { resolveCourierConfigId } from "@/services/dispatch/courier-routing";
 
 // ─── Concurrency-limited pool ─────────────────────────────────────────────────
 // Runs `handler` for each item but limits simultaneous executions to `concurrency`.
@@ -50,12 +51,18 @@ export async function POST(request: NextRequest) {
 
     const { data: shops } = await admin
       .from("shops")
-      .select("id, organization_id")
+      .select("id, organization_id, automatic_courier, shipping_method_routing_enabled")
       .in("organization_id", authorizedOrgIds);
 
     const authorizedShopIds = new Set((shops || []).map((s: { id: string }) => s.id));
     const shopOrgMap = new Map(
       (shops || []).map((s: { id: string; organization_id: string }) => [s.id, s.organization_id])
+    );
+    const shopSettingsMap = new Map(
+      (shops || []).map((s: { id: string; automatic_courier: boolean; shipping_method_routing_enabled: boolean }) => [
+        s.id,
+        { automatic_courier: Boolean(s.automatic_courier), shipping_method_routing_enabled: Boolean(s.shipping_method_routing_enabled) }
+      ])
     );
 
     type OrderRecord = {
@@ -64,6 +71,8 @@ export async function POST(request: NextRequest) {
       shop_id: string;
       customer_phone: string | null;
       shipping_address: Record<string, unknown> | null;
+      shipping_method: string | null;
+      shipping_method_code: string | null;
       dispatch_status: string;
       cancelled_at: string | null;
       total_minor: number;
@@ -73,7 +82,7 @@ export async function POST(request: NextRequest) {
     // 2. Fetch the orders being dispatched
     const { data: orders } = await admin
       .from("orders")
-      .select("id, name, shop_id, customer_phone, shipping_address, dispatch_status, cancelled_at, total_minor, currency")
+      .select("id, name, shop_id, customer_phone, shipping_address, shipping_method, shipping_method_code, dispatch_status, cancelled_at, total_minor, currency")
       .in("id", input.orderIds);
 
     const orderMap = new Map(
@@ -114,6 +123,25 @@ export async function POST(request: NextRequest) {
           return { orderId, orderName: order.name, status: "failed", reason: "Missing phone number or delivery address" };
         }
 
+        const shopSettings = shopSettingsMap.get(order.shop_id);
+        let courierConfigId = input.courierConfigId;
+
+        // When shipping-method routing is enabled, routing rules take precedence
+        // over the UI's default courier selection for each individual order.
+        if (shopSettings?.automatic_courier && shopSettings.shipping_method_routing_enabled) {
+          courierConfigId = await resolveCourierConfigId(
+            admin,
+            order.shop_id,
+            order.shipping_method,
+            order.shipping_method_code,
+            true
+          );
+        }
+
+        if (!courierConfigId) {
+          return { orderId, orderName: order.name, status: "failed", reason: "No courier could be selected for this order" };
+        }
+
         // Claim dispatch lock idempotently via Supabase RPC
         const idempotencyKey = crypto.randomUUID();
         const { data: claim, error: claimError } = await supabase.rpc("claim_dispatch", {
@@ -128,7 +156,7 @@ export async function POST(request: NextRequest) {
         try {
           const execution = await dispatchService.execute(
             claim.id,
-            input.courierConfigId,
+            courierConfigId,
             input.pickupLocationId,
             user.id
           );
