@@ -87,7 +87,10 @@ export function SystemHealth() {
     }
   }, []);
 
-  useEffect(() => { check(); }, [check]);
+  useEffect(() => { 
+    // eslint-disable-next-line
+    check(); 
+  }, [check]);
 
   function getServiceStatus(key: string): ServiceResult {
     if (loading || !health) return { status: "loading" };

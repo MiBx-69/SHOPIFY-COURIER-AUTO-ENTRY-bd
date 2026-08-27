@@ -100,6 +100,15 @@ export class RedxProvider implements CourierProvider {
     requireFields(c, ["apiToken"]);
   }
 
+  getCapabilities() {
+    return {
+      supportsPickupLocations: false,
+      supportsPerShipmentPickupLocation: false,
+      supportsPickupLocationSync: false,
+      supportsCancellation: true
+    };
+  }
+
   private baseUrl(c: Record<string, string>) {
     const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
     return isSandbox ? "https://sandbox.redx.com.bd/v1.0.0-beta" : "https://openapi.redx.com.bd/v1.0.0-beta";
@@ -121,19 +130,9 @@ export class RedxProvider implements CourierProvider {
     }
   }
 
-  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+  async getPickupLocations(_c: CourierCredentials): Promise<PickupLocation[]> {
     // RedX production payload no longer supports pickup locations (no-area-parcels).
-    // Return a generic default.
-    return [
-      {
-        id: "redx_default_hub",
-        courierLocationId: "redx_default_hub",
-        name: c.senderName ? `${c.senderName} Warehouse` : "Main Warehouse",
-        address: c.pickupAddress || "Registered Merchant Address",
-        phone: c.senderPhone || undefined,
-        isActive: true
-      }
-    ];
+    return [];
   }
 
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
@@ -225,6 +224,15 @@ export class PathaoProvider implements CourierProvider {
     requireFields(c, ["clientId", "clientSecret", "username", "password"]);
   }
 
+  getCapabilities() {
+    return {
+      supportsPickupLocations: true,
+      supportsPerShipmentPickupLocation: true,
+      supportsPickupLocationSync: true,
+      supportsCancellation: true
+    };
+  }
+
   private baseUrl(c: Record<string, string>) {
     const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
     return isSandbox ? "https://api-hermes-sandbox.pathao.com" : "https://api-hermes.pathao.com";
@@ -297,24 +305,12 @@ export class PathaoProvider implements CourierProvider {
       const token = await this.token(c);
 
       // Resolve store_id
-      let chosenStoreId = Number(p.pickupLocationId);
-      if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
-        // Fallback: fetch available stores to find the first valid integer store_id
-        try {
-          const locations = await this.getPickupLocations(c);
-          const validLoc = locations.find((l) => !isNaN(Number(l.courierLocationId || l.id)) && Number(l.courierLocationId || l.id) > 0);
-          if (validLoc) {
-            chosenStoreId = Number(validLoc.courierLocationId || validLoc.id);
-          }
-        } catch {
-          // Ignored
-        }
-      }
+      const chosenStoreId = Number(p.pickupLocationId);
 
       if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
         return {
           outcome: "known_failure",
-          message: "Pathao requires a valid numeric Pickup Store ID. Please configure your store in Settings."
+          message: "Pathao requires a valid numeric Pickup Store ID. Please select a valid Pathao pickup store."
         };
       }
 
@@ -406,6 +402,15 @@ export class SteadfastProvider implements CourierProvider {
     requireFields(c, ["apiKey", "secretKey"]);
   }
 
+  getCapabilities() {
+    return {
+      supportsPickupLocations: false,
+      supportsPerShipmentPickupLocation: false,
+      supportsPickupLocationSync: false,
+      supportsCancellation: false
+    };
+  }
+
   private baseUrl(c: Record<string, string>) {
     const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
     return isSandbox ? "https://sandbox.steadfast.com.bd" : "https://portal.steadfast.com.bd";
@@ -423,18 +428,8 @@ export class SteadfastProvider implements CourierProvider {
     if (!response.ok) throw new Error("Steadfast credentials were rejected");
   }
 
-  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
-    this.validateConfig(c);
-    return [
-      {
-        id: "steadfast_primary",
-        courierLocationId: "steadfast_primary",
-        name: c.senderName ? `${c.senderName} Warehouse` : "Main Warehouse (Steadfast)",
-        address: c.pickupAddress || "Registered Merchant Address",
-        phone: c.senderPhone || undefined,
-        isActive: true
-      }
-    ];
+  async getPickupLocations(_c: CourierCredentials): Promise<PickupLocation[]> {
+    return [];
   }
 
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {

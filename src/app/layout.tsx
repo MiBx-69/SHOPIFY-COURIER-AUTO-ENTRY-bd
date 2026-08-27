@@ -38,6 +38,8 @@ export const metadata: Metadata = {
   }
 };
 
+import NextTopLoader from "nextjs-toploader";
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
@@ -47,6 +49,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
       </head>
       <body>
         <ReactQueryProvider>
+          <NextTopLoader color="#000000" height={3} showSpinner={false} />
           <Suspense fallback={null}>
             <AppBridgeProvider />
           </Suspense>

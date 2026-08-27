@@ -272,6 +272,7 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
                   {/* Product Image */}
                   <div className="size-10 rounded-md overflow-hidden border border-slate-100 shrink-0 bg-slate-50 flex items-center justify-center">
                     {imageUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={imageUrl}
                         alt={item.title}

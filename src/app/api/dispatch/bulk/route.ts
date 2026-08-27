@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
               pickup_location_id: input.pickupLocationId ?? null,
             },
           });
-        } catch {}
+        } catch { /* ignored */ }
       })();
     }
 

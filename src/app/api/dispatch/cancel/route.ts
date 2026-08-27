@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
         if (shopIdsToInvalidate.length > 0) {
           await invalidateCountsCache(shopIdsToInvalidate);
         }
-      } catch {}
+      } catch { /* ignored */ }
     })();
 
     return NextResponse.json({

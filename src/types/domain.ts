@@ -14,6 +14,13 @@ export type PickupLocation = {
   metadata?: Record<string, unknown>;
 };
 
+export type CourierCapabilities = {
+  supportsPickupLocations: boolean;
+  supportsPerShipmentPickupLocation: boolean;
+  supportsPickupLocationSync: boolean;
+  supportsCancellation: boolean;
+};
+
 export type NormalizedShipment = {
   orderId: string;
   orderNumber: string;

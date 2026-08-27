@@ -69,7 +69,7 @@ export function SecuritySettings({ email, recentEvents }: Props) {
       if (!res.ok) throw new Error("Logout failed");
       setLogoutStatus("success");
       // Clear local state and redirect
-      setTimeout(() => { window.location.href = "/login"; }, 1000);
+      setTimeout(() => { window.location.assign("/login"); }, 1000);
     } catch {
       setLogoutStatus("error");
     }
@@ -82,7 +82,7 @@ export function SecuritySettings({ email, recentEvents }: Props) {
       const res = await fetch("/api/auth/logout-everywhere", { method: "POST" });
       if (!res.ok) throw new Error("Logout everywhere failed");
       setLogoutEverywhereStatus("success");
-      setTimeout(() => { window.location.href = "/login"; }, 1200);
+      setTimeout(() => { window.location.assign("/login"); }, 1200);
     } catch {
       setLogoutEverywhereStatus("error");
     }

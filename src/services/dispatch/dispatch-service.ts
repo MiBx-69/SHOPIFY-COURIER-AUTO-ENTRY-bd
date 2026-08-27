@@ -98,17 +98,29 @@ export class DispatchService {
         );
         const availableLocations = locationsData.locations || [];
 
-        if (availableLocations.length === 0) {
-          lastError = `No pickup location is configured for ${courierDisplayName}.`;
-          continue; // Try next courier
-        }
+        const provider = courierRegistry.get(selected.provider);
+        const capabilities = provider.getCapabilities();
 
-        // Resolve location
-        let chosenLocation = availableLocations.find(
-          (l) => l.id === requestedPickupLocationId || l.courierLocationId === requestedPickupLocationId
-        );
-        if (!chosenLocation) {
-          chosenLocation = availableLocations.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || availableLocations[0];
+        let chosenLocation;
+
+        if (capabilities.supportsPerShipmentPickupLocation) {
+          if (!requestedPickupLocationId) {
+            return this.fail(dispatch, `Pickup location is required for ${courierDisplayName}.`);
+          }
+          chosenLocation = availableLocations.find(
+            (l) => l.id === requestedPickupLocationId || l.courierLocationId === requestedPickupLocationId
+          );
+          if (!chosenLocation) {
+            return this.fail(dispatch, `The selected pickup location is no longer available for ${courierDisplayName}. Please select another pickup location.`);
+          }
+        } else {
+          if (availableLocations.length === 0) {
+            lastError = `No pickup location is configured for ${courierDisplayName}.`;
+            continue; // Try next courier
+          }
+          // For couriers that don't support per-shipment selection, 
+          // we use their implicit configuration (e.g. from the account/adapter)
+          chosenLocation = availableLocations[0];
         }
 
         const { data: secret, error: secretError } = await admin
@@ -167,7 +179,6 @@ export class DispatchService {
           }))
         };
 
-        const provider = courierRegistry.get(selected.provider);
         const attempt = await admin.from("dispatch_attempts").insert({
           dispatch_id: dispatch.id,
           shop_id: dispatch.shop_id,
@@ -226,6 +237,11 @@ export class DispatchService {
           tracking_id: result.trackingId,
           courier_reference: result.courierReference,
           courier_status: "created",
+          pickup_location_id: chosenLocation?.id,
+          pickup_location_name: chosenLocation?.name,
+          pickup_provider_id: chosenLocation?.courierLocationId,
+          pickup_address: chosenLocation?.address,
+          pickup_phone: chosenLocation?.phone,
           safe_error_message: null,
           dispatched_at: new Date().toISOString(),
           updated_at: new Date().toISOString()

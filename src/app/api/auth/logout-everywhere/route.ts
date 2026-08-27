@@ -20,7 +20,7 @@ export async function POST() {
         await admin
           .from("security_events")
           .insert({ user_id: user.id, event_type: "logout_everywhere", metadata: { scope: "global", initiated_at: new Date().toISOString() } });
-      } catch {}
+      } catch { /* ignored */ }
     })();
 
     // Revoke all other sessions via admin API (Supabase admin.auth.signOut)

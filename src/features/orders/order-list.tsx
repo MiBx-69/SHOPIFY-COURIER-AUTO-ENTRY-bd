@@ -305,6 +305,7 @@ export function OrderList({
       return body.data as TabCounts;
     },
     refetchInterval: 15000,
+    staleTime: 15000,
   });
 
   const { data: savedFiltersData } = useQuery({
@@ -314,7 +315,8 @@ export function OrderList({
       if (!res.ok) throw new Error("Failed");
       const body = await res.json();
       return body.data as SavedFilter[];
-    }
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: pickupLocationsData } = useQuery({
@@ -324,7 +326,8 @@ export function OrderList({
       if (!res.ok) throw new Error("Failed");
       const body = await res.json();
       return body.data as Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>;
-    }
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   const ordersQueryParams = useMemo(() => {
@@ -354,7 +357,8 @@ export function OrderList({
       if (!response.ok) throw new Error(body.error || "Failed to load orders");
       return { data: body.data as Order[], count: body.count as number };
     },
-    placeholderData: (prev) => prev, // keeps old data visible while fetching new page
+    placeholderData: (prev) => prev,
+    staleTime: 5000,
   });
 
   const orders = ordersResponse?.data || [];
@@ -367,6 +371,7 @@ export function OrderList({
   // Maintain selected cache across pages
   useEffect(() => {
     if (orders.length > 0) {
+      // eslint-disable-next-line
       setSelectedOrderCache((prev) => {
         const next = new Map(prev);
         orders.forEach((o) => {
@@ -1792,8 +1797,13 @@ export function OrderList({
               </Button>
               <Button
                 onClick={singleDispatchOrder ? executeSingleDispatch : executeBulkDispatch}
-                disabled={batchProcessing}
-                className="flex-1 h-9 text-xs bg-slate-900 hover:bg-slate-800 text-white font-bold"
+                disabled={batchProcessing || (() => {
+                  const activeCourierId = singleDispatchOrder ? singleDispatchCourierId : bulkCourierId;
+                  const locs = courierPickupMap[activeCourierId]?.locations || [];
+                  const selectedLoc = singleDispatchOrder ? singleDispatchPickupLocationId : bulkPickupLocationId;
+                  return locs.length > 0 && !selectedLoc;
+                })()}
+                className="flex-1 h-9 text-xs bg-slate-900 hover:bg-slate-800 text-white font-bold disabled:opacity-50"
               >
                 {batchProcessing ? "Processing Dispatch…" : "Confirm Dispatch"}
               </Button>

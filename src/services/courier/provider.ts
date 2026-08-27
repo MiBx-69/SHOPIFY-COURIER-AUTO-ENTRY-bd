@@ -10,6 +10,7 @@ export interface CourierProvider {
   getTracking(trackingId: string, credentials: CourierCredentials): Promise<{ status: string; message?: string; occurredAt?: string }>;
   getPickupLocations(credentials: CourierCredentials): Promise<PickupLocation[]>;
   cancelShipment?(trackingId: string, credentials: CourierCredentials): Promise<void>;
+  getCapabilities(): import("@/types/domain").CourierCapabilities;
 }
 
 export async function courierFetch(url: string, options: RequestInit, timeoutMs = 15_000) {

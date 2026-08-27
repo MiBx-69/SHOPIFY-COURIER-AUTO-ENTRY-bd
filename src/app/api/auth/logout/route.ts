@@ -18,7 +18,7 @@ export async function POST() {
         await createAdminClient()
           .from("security_events")
           .insert({ user_id: user.id, event_type: "logout", metadata: { scope: "current_device" } });
-      } catch {}
+      } catch { /* ignored */ }
     })();
 
     const { error } = await supabase.auth.signOut({ scope: "local" });
