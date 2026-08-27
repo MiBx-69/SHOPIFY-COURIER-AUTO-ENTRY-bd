@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/crypto";
 import { courierRegistry } from "@/services/courier/registry";
-import { selectCourier } from "@/services/courier/selector";
+import { selectCourier, getEligibleCouriers } from "@/services/courier/selector";
 import { PickupLocationService } from "@/services/courier/pickup-locations";
 import { normalizeBdPhone, normalizeDeliveryAddress } from "@/services/courier/providers";
 import { updateShopifyDispatchMetafields, createShopifyFulfillment } from "@/services/shopify/client";
@@ -74,229 +74,223 @@ export class DispatchService {
         return this.fail(dispatch, "No enabled courier is configured for this store. Please configure couriers in Settings.");
       }
 
-      let selected;
+      let eligibleCouriers;
       try {
-        selected = selectCourier(candidates, requestedConfigId);
+        eligibleCouriers = getEligibleCouriers(candidates, requestedConfigId);
+        if (!eligibleCouriers.length) {
+          return this.fail(dispatch, "No eligible courier available");
+        }
       } catch (selErr) {
         return this.fail(dispatch, selErr instanceof Error ? selErr.message : "No eligible courier available");
       }
 
-      const selectedMeta = candidates.find((c) => c.id === selected.id);
-      const courierDisplayName = selectedMeta?.display_name || selected.provider.toUpperCase();
+      let lastError: string | undefined;
 
-      // Fetch pickup locations for selected courier
-      const locationsData = await PickupLocationService.get(
-        selected.id, 
-        dispatch.shop_id, 
-        actorId || dispatch.created_by || "system"
-      );
-      const availableLocations = locationsData.locations || [];
+      for (const selected of eligibleCouriers) {
+        const selectedMeta = candidates.find((c) => c.id === selected.id);
+        const courierDisplayName = selectedMeta?.display_name || selected.provider.toUpperCase();
 
-      if (availableLocations.length === 0) {
-        return this.fail(dispatch, `No pickup location is configured for ${courierDisplayName}. Please configure pickup locations in Settings.`);
-      }
+        // Fetch pickup locations for selected courier
+        const locationsData = await PickupLocationService.get(
+          selected.id, 
+          dispatch.shop_id, 
+          actorId || dispatch.created_by || "system"
+        );
+        const availableLocations = locationsData.locations || [];
 
-      // Resolve location
-      let chosenLocation = availableLocations.find(
-        (l) => l.id === requestedPickupLocationId || l.courierLocationId === requestedPickupLocationId
-      );
-      if (!chosenLocation) {
-        chosenLocation = availableLocations.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || availableLocations[0];
-      }
-
-      const { data: secret, error: secretError } = await admin
-        .from("courier_secrets")
-        .select("ciphertext,iv,auth_tag")
-        .eq("courier_config_id", selected.id)
-        .single();
-
-      if (secretError || !secret) {
-        return this.fail(dispatch, `Courier credentials for ${courierDisplayName} are unavailable or missing.`);
-      }
-
-      const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
-      const items = (order.order_line_items || []) as Array<Record<string, unknown>>;
-
-      const normalizedPhone = normalizeBdPhone(String(order.customer_phone || ""));
-      if (!normalizedPhone || normalizedPhone.length < 11) {
-        return this.fail(dispatch, `Customer phone (${order.customer_phone || "none"}) is invalid. Courier requires an 11-digit mobile number.`);
-      }
-
-      const shippingAddr = (order.shipping_address || {}) as Record<string, string>;
-      const formattedAddress = normalizeDeliveryAddress(shippingAddr);
-
-      const isPrepaid = String(order.financial_status || "").toLowerCase() === "paid";
-      const codAmount = isPrepaid ? 0 : Math.max(0, Math.round(Number(order.total_minor || 0) / 100));
-
-      const orderNumberStr = String(
-        order.order_number && Number(order.order_number) > 0
-          ? order.order_number
-          : (order.name || order.id)
-      ).replace(/[^a-zA-Z0-9_-]/g, "") || String(order.name || order.id);
-
-      const payload: NormalizedShipment = {
-        orderId: String(order.id),
-        orderNumber: orderNumberStr,
-        customerName: String(order.customer_name || "Customer"),
-        phone: normalizedPhone,
-        email: order.customer_email ? String(order.customer_email) : undefined,
-        fullAddress: formattedAddress,
-        city: shippingAddr.city || "Dhaka",
-        area: shippingAddr.area || shippingAddr.province || undefined,
-        postalCode: shippingAddr.zip || undefined,
-        codAmount: codAmount,
-        notes: order.note ? String(order.note) : undefined,
-        pickupLocationId: chosenLocation.courierLocationId || chosenLocation.id,
-        pickupLocationName: chosenLocation.name,
-        pickupAddress: chosenLocation.address,
-        pickupPhone: chosenLocation.phone,
-        items: items.map((item) => ({
-          productName: String(item.title || "Product"),
-          variant: item.variant_title ? String(item.variant_title) : undefined,
-          sku: item.sku ? String(item.sku) : undefined,
-          quantity: Math.max(1, Number(item.quantity) || 1),
-          price: Number(item.unit_price_minor || 0) / 100
-        }))
-      };
-
-      const provider = courierRegistry.get(selected.provider);
-      const attempt = await admin.from("dispatch_attempts").insert({
-        dispatch_id: dispatch.id,
-        shop_id: dispatch.shop_id,
-        provider: selected.provider,
-        idempotency_key: dispatch.idempotency_key,
-        status: "started",
-        request_metadata: {
-          pickup_location_id: chosenLocation.id,
-          pickup_location_name: chosenLocation.name,
-          pickup_address: chosenLocation.address,
-          pickup_phone: chosenLocation.phone
+        if (availableLocations.length === 0) {
+          lastError = `No pickup location is configured for ${courierDisplayName}.`;
+          continue; // Try next courier
         }
-      }).select().single();
 
-      // Log structured dispatch execution start
-      console.info(`[DISPATCH START] dispatch_id=${dispatch.id} order_id=${dispatch.order_id} courier=${selected.provider} pickup_location="${chosenLocation.name}"`);
+        // Resolve location
+        let chosenLocation = availableLocations.find(
+          (l) => l.id === requestedPickupLocationId || l.courierLocationId === requestedPickupLocationId
+        );
+        if (!chosenLocation) {
+          chosenLocation = availableLocations.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || availableLocations[0];
+        }
 
-      const result = await provider.createShipment(payload, credentials, dispatch.idempotency_key);
+        const { data: secret, error: secretError } = await admin
+          .from("courier_secrets")
+          .select("ciphertext,iv,auth_tag")
+          .eq("courier_config_id", selected.id)
+          .single();
 
-      if (result.outcome !== "success") {
+        if (secretError || !secret) {
+          lastError = `Courier credentials for ${courierDisplayName} are unavailable or missing.`;
+          continue; // Try next courier
+        }
+
+        const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
+        const items = (order.order_line_items || []) as Array<Record<string, unknown>>;
+
+        const normalizedPhone = normalizeBdPhone(String(order.customer_phone || ""));
+        if (!normalizedPhone || normalizedPhone.length < 11) {
+          return this.fail(dispatch, `Customer phone (${order.customer_phone || "none"}) is invalid. Courier requires an 11-digit mobile number.`);
+        }
+
+        const shippingAddr = (order.shipping_address || {}) as Record<string, string>;
+        const formattedAddress = normalizeDeliveryAddress(shippingAddr);
+
+        const isPrepaid = String(order.financial_status || "").toLowerCase() === "paid";
+        const codAmount = isPrepaid ? 0 : Math.max(0, Math.round(Number(order.total_minor || 0) / 100));
+
+        const orderNumberStr = String(
+          order.order_number && Number(order.order_number) > 0
+            ? order.order_number
+            : (order.name || order.id)
+        ).replace(/[^a-zA-Z0-9_-]/g, "") || String(order.name || order.id);
+
+        const payload: NormalizedShipment = {
+          orderId: String(order.id),
+          orderNumber: orderNumberStr,
+          customerName: String(order.customer_name || "Customer"),
+          phone: normalizedPhone,
+          email: order.customer_email ? String(order.customer_email) : undefined,
+          fullAddress: formattedAddress,
+          city: shippingAddr.city || "Dhaka",
+          area: shippingAddr.area || shippingAddr.province || undefined,
+          postalCode: shippingAddr.zip || undefined,
+          codAmount: codAmount,
+          notes: order.note ? String(order.note) : undefined,
+          pickupLocationId: chosenLocation.courierLocationId || chosenLocation.id,
+          pickupLocationName: chosenLocation.name,
+          pickupAddress: chosenLocation.address,
+          pickupPhone: chosenLocation.phone,
+          items: items.map((item) => ({
+            productName: String(item.title || "Product"),
+            variant: item.variant_title ? String(item.variant_title) : undefined,
+            sku: item.sku ? String(item.sku) : undefined,
+            quantity: Math.max(1, Number(item.quantity) || 1),
+            price: Number(item.unit_price_minor || 0) / 100
+          }))
+        };
+
+        const provider = courierRegistry.get(selected.provider);
+        const attempt = await admin.from("dispatch_attempts").insert({
+          dispatch_id: dispatch.id,
+          shop_id: dispatch.shop_id,
+          provider: selected.provider,
+          idempotency_key: dispatch.idempotency_key,
+          status: "started",
+          request_metadata: {
+            pickup_location_id: chosenLocation.id,
+            pickup_location_name: chosenLocation.name,
+            pickup_address: chosenLocation.address,
+            pickup_phone: chosenLocation.phone
+          }
+        }).select().single();
+
+        // Log structured dispatch execution start
+        console.info(`[DISPATCH START] dispatch_id=${dispatch.id} order_id=${dispatch.order_id} courier=${selected.provider} pickup_location="${chosenLocation.name}"`);
+
+        const result = await provider.createShipment(payload, credentials, dispatch.idempotency_key);
+
+        if (result.outcome !== "success") {
+          await admin.from("dispatch_attempts").update({
+            status: result.outcome,
+            completed_at: new Date().toISOString(),
+            error_code: result.code,
+            safe_error_message: result.message,
+            response_metadata: result.metadata || {}
+          }).eq("id", attempt.data?.id);
+
+          lastError = result.message || `Courier ${selected.provider} rejected shipment creation`;
+          console.warn(`[DISPATCH RETRY] Failed with ${selected.provider}: ${lastError}`);
+          continue; // Try next eligible courier
+        }
+
+        console.info(`[DISPATCH SUCCESS] dispatch_id=${dispatch.id} order_id=${dispatch.order_id} tracking_id=${result.trackingId} courier=${selected.provider}`);
+
         await admin.from("dispatch_attempts").update({
-          status: result.outcome,
+          status: "success",
           completed_at: new Date().toISOString(),
-          error_code: result.code,
-          safe_error_message: result.message,
+          external_reference: result.courierReference,
           response_metadata: result.metadata || {}
         }).eq("id", attempt.data?.id);
 
-        if (result.outcome === "unknown") {
-          const { data: unknownDispatch } = await admin
-            .from("dispatches")
-            .update({ 
-              phase: "unknown", 
-              safe_error_message: "Courier outcome is unknown; reconcile before retrying.",
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", dispatch.id)
-            .select()
-            .single();
-
-          return {
-            success: false,
-            status: "unknown",
-            error: "Courier outcome is unknown; reconcile before retrying.",
-            data: unknownDispatch as Record<string, unknown>
-          };
-        }
-
-        return this.fail(dispatch, result.message || "Courier rejected shipment creation");
-      }
-
-      console.info(`[DISPATCH SUCCESS] dispatch_id=${dispatch.id} order_id=${dispatch.order_id} tracking_id=${result.trackingId} courier=${selected.provider}`);
-
-      await admin.from("dispatch_attempts").update({
-        status: "success",
-        completed_at: new Date().toISOString(),
-        external_reference: result.courierReference,
-        response_metadata: result.metadata || {}
-      }).eq("id", attempt.data?.id);
-
-      await admin.from("courier_shipments").insert({
-        dispatch_id: dispatch.id,
-        shop_id: dispatch.shop_id,
-        provider: selected.provider,
-        tracking_id: result.trackingId,
-        courier_reference: result.courierReference,
-        status: "created"
-      });
-
-      await admin.from("dispatches").update({
-        courier_config_id: selected.id,
-        status: "dispatched",
-        phase: "courier_created",
-        tracking_id: result.trackingId,
-        courier_reference: result.courierReference,
-        courier_status: "created",
-        safe_error_message: null,
-        dispatched_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      }).eq("id", dispatch.id);
-
-      await admin.from("orders").update({ 
-        dispatch_status: "dispatched",
-        updated_at: new Date().toISOString()
-      }).eq("id", dispatch.order_id);
-
-      // Record permanent order event with pickup location details
-      await admin.from("order_events").insert({
-        shop_id: dispatch.shop_id,
-        order_id: dispatch.order_id,
-        event_type: "order_dispatched",
-        payload: {
+        await admin.from("courier_shipments").insert({
+          dispatch_id: dispatch.id,
+          shop_id: dispatch.shop_id,
           provider: selected.provider,
           tracking_id: result.trackingId,
           courier_reference: result.courierReference,
-          pickup_location_id: chosenLocation.id,
-          pickup_location_name: chosenLocation.name,
-          pickup_address: chosenLocation.address,
-          pickup_phone: chosenLocation.phone,
-          dispatched_at: new Date().toISOString()
-        }
-      });
-
-      try { 
-        await updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), {
-          courier: selected.provider,
-          trackingId: result.trackingId,
-          reference: result.courierReference,
-          dispatchedAt: new Date().toISOString()
-        }); 
-        await createShopifyFulfillment(dispatch.shop_id, String(order.shopify_order_gid), {
-          company: selected.provider,
-          number: result.trackingId
+          status: "created"
         });
-        await admin.from("dispatches").update({ 
-          phase: "completed", 
-          shopify_updated_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }).eq("id", dispatch.id); 
-      } catch { 
-        await admin.from("dispatches").update({ 
-          phase: "shopify_update_pending", 
-          safe_error_message: "Courier shipment created; Shopify update requires attention.",
-          updated_at: new Date().toISOString()
-        }).eq("id", dispatch.id); 
-      }
 
-      const { data: finalDispatch } = await admin.from("dispatches").select().eq("id", dispatch.id).single();
+        await admin.from("dispatches").update({
+          courier_config_id: selected.id,
+          status: "dispatched",
+          phase: "courier_created",
+          tracking_id: result.trackingId,
+          courier_reference: result.courierReference,
+          courier_status: "created",
+          safe_error_message: null,
+          dispatched_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("id", dispatch.id);
 
-      return {
-        success: true,
-        status: "dispatched",
-        trackingId: result.trackingId,
-        courierReference: result.courierReference,
-        courierName: courierDisplayName,
-        data: finalDispatch as Record<string, unknown>
-      };
+        await admin.from("orders").update({ 
+          dispatch_status: "dispatched",
+          updated_at: new Date().toISOString()
+        }).eq("id", dispatch.order_id);
+
+        // Record permanent order event with pickup location details
+        await admin.from("order_events").insert({
+          shop_id: dispatch.shop_id,
+          order_id: dispatch.order_id,
+          event_type: "order_dispatched",
+          payload: {
+            provider: selected.provider,
+            tracking_id: result.trackingId,
+            courier_reference: result.courierReference,
+            pickup_location_id: chosenLocation.id,
+            pickup_location_name: chosenLocation.name,
+            pickup_address: chosenLocation.address,
+            pickup_phone: chosenLocation.phone,
+            dispatched_at: new Date().toISOString()
+          }
+        });
+
+        try { 
+          await updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), {
+            courier: selected.provider,
+            trackingId: result.trackingId,
+            reference: result.courierReference,
+            dispatchedAt: new Date().toISOString()
+          }); 
+          await createShopifyFulfillment(dispatch.shop_id, String(order.shopify_order_gid), {
+            company: selected.provider,
+            number: result.trackingId
+          });
+          await admin.from("dispatches").update({ 
+            phase: "completed", 
+            shopify_updated_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }).eq("id", dispatch.id); 
+        } catch { 
+          await admin.from("dispatches").update({ 
+            phase: "shopify_update_pending", 
+            safe_error_message: "Courier shipment created; Shopify update requires attention.",
+            updated_at: new Date().toISOString()
+          }).eq("id", dispatch.id); 
+        }
+
+        const { data: finalDispatch } = await admin.from("dispatches").select().eq("id", dispatch.id).single();
+
+        return {
+          success: true,
+          status: "dispatched",
+          trackingId: result.trackingId,
+          courierReference: result.courierReference,
+          courierName: courierDisplayName,
+          data: finalDispatch as Record<string, unknown>
+        };
+      } // End for loop over eligible couriers
+      
+      // If we fall through the loop, all couriers failed
+      return this.fail(dispatch, lastError || "All eligible couriers failed to process this shipment.");
     } catch (unhandledErr) {
       const errMsg = unhandledErr instanceof Error ? unhandledErr.message : "Unexpected error during dispatch";
       return this.fail(dispatch, errMsg);

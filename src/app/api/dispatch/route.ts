@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiError, currentUser } from "@/lib/api/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchRequestSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
@@ -43,6 +44,36 @@ export async function POST(request: NextRequest) {
         data: result.data
       }, { status: result.status === "unknown" ? 502 : 422 });
     }
+
+    (async () => {
+      try {
+        const admin = createAdminClient();
+        const { data: order } = await admin.from("orders").select("shop_id").eq("id", body.orderId).maybeSingle();
+        if (order) {
+          const { data: shop } = await admin.from("shops").select("organization_id").eq("id", order.shop_id).maybeSingle();
+          
+          // Invalidate cache since order state changed
+          const { invalidateCountsCache } = await import("@/lib/redis");
+          await invalidateCountsCache([order.shop_id]);
+          
+          if (shop) {
+            await admin.from("audit_logs").insert({
+              organization_id: shop.organization_id,
+              shop_id: order.shop_id,
+              actor_id: user.id,
+              action: "dispatch.single",
+              entity_type: "order",
+              entity_id: body.orderId,
+              metadata: {
+                status: result.status,
+                tracking_id: result.trackingId,
+                courier_name: result.courierName
+              }
+            });
+          }
+        }
+      } catch {}
+    })();
 
     return NextResponse.json({
       success: true,

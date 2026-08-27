@@ -1,6 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, User, MapPin, Truck, Package, Clock, History, Activity, AlertTriangle, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, User, MapPin, Truck, Package, Clock, History, Activity, Tag } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { money } from "@/lib/utils";
@@ -10,6 +10,7 @@ import {
   DispatchBadge
 } from "@/components/ui/status-badge";
 import { OrderSyncButton } from "@/features/orders/order-sync-button";
+import { CustomerActions, CopyButton } from "@/components/ui/copy-actions";
 
 type DispatchAttempt = {
   id: string;
@@ -166,13 +167,20 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
         {/* Customer & Delivery */}
         <section className="rounded-lg border border-slate-200 bg-white p-4 text-xs shadow-2xs space-y-3">
           <div>
-            <div className="flex items-center gap-1.5 text-slate-900 font-semibold mb-1">
+            <div className="flex items-center gap-1.5 text-slate-900 font-semibold mb-2">
               <User size={13} className="text-slate-400" />
               Customer
             </div>
             <p className="font-medium text-slate-800">{order.customer_name || "—"}</p>
-            <p className="text-slate-500 font-mono mt-0.5">{order.customer_phone || "No phone provided"}</p>
-            <p className="text-slate-500 mt-0.5">{order.customer_email || "No email provided"}</p>
+            <div className="mt-2 space-y-2">
+              <CustomerActions
+                phone={order.customer_phone}
+                email={order.customer_email}
+                address={address || undefined}
+                trackingId={dispatch?.tracking_id}
+                orderName={order.name}
+              />
+            </div>
           </div>
 
           <div className="border-t border-slate-100 pt-3">
@@ -236,7 +244,6 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
           )}
         </section>
 
-        {/* Order Line Items */}
         <section className="rounded-lg border border-slate-200 bg-white p-4 text-xs shadow-2xs md:col-span-2">
           <div className="flex items-center gap-1.5 text-slate-900 font-semibold mb-3">
             <Package size={13} className="text-slate-400" />
@@ -249,23 +256,91 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
               title: string; 
               variant_title: string | null; 
               sku: string | null; 
-              quantity: number; 
-              total_price_minor: number 
-            }) => (
-              <div key={item.id} className="flex items-center justify-between p-2.5 bg-white hover:bg-slate-50/50 transition-colors">
-                <div className="min-w-0 flex-1 pr-4">
-                  <p className="font-medium text-slate-800">{item.title}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {item.variant_title ? `${item.variant_title} · ` : ""}
-                    {item.sku ? <span className="font-mono">SKU: {item.sku} · </span> : ""}
-                    <span>Qty: {item.quantity}</span>
-                  </p>
+              quantity: number;
+              unit_price_minor: number;
+              total_price_minor: number;
+              product_snapshot?: Record<string, unknown>;
+            }) => {
+              // Try to get product image from snapshot
+              const snapshot = item.product_snapshot as Record<string, unknown> | undefined;
+              const imageUrl = (snapshot?.image as Record<string, string> | undefined)?.src ||
+                (snapshot?.image as Record<string, string> | undefined)?.url ||
+                null;
+
+              return (
+                <div key={item.id} className="flex items-center justify-between p-3 bg-white hover:bg-slate-50/50 transition-colors gap-3">
+                  {/* Product Image */}
+                  <div className="size-10 rounded-md overflow-hidden border border-slate-100 shrink-0 bg-slate-50 flex items-center justify-center">
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt={item.title}
+                        className="object-cover size-full"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <Package size={16} className="text-slate-300" />
+                    )}
+                  </div>
+
+                  {/* Product Info */}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-slate-800 truncate">{item.title}</p>
+                    {item.variant_title && (
+                      <p className="text-[11px] text-slate-500 mt-0.5">{item.variant_title}</p>
+                    )}
+                    <p className="text-[11px] text-slate-400 mt-0.5 space-x-2">
+                      {item.sku && <span className="font-mono">SKU: {item.sku}</span>}
+                      <span>Qty: {item.quantity}</span>
+                    </p>
+                  </div>
+
+                  {/* Pricing */}
+                  <div className="text-right shrink-0">
+                    <p className="font-semibold text-slate-900">{money(item.total_price_minor, order.currency)}</p>
+                    {item.quantity > 1 && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        {money(item.unit_price_minor, order.currency)} × {item.quantity}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="font-semibold text-slate-900 whitespace-nowrap">
-                  {money(item.total_price_minor, order.currency)}
+              );
+            })}
+          </div>
+
+          {/* Order Total Breakdown */}
+          <div className="mt-3 border border-slate-100 rounded-md overflow-hidden bg-slate-50/70">
+            <div className="divide-y divide-slate-100 text-xs">
+              {order.subtotal_minor > 0 && (
+                <div className="flex justify-between px-3 py-2">
+                  <span className="text-slate-500">Subtotal</span>
+                  <span className="text-slate-700">{money(order.subtotal_minor, order.currency)}</span>
                 </div>
+              )}
+              {order.discount_minor > 0 && (
+                <div className="flex justify-between px-3 py-2">
+                  <span className="text-slate-500">Discount</span>
+                  <span className="text-emerald-600">− {money(order.discount_minor, order.currency)}</span>
+                </div>
+              )}
+              {order.shipping_minor > 0 && (
+                <div className="flex justify-between px-3 py-2">
+                  <span className="text-slate-500">Shipping</span>
+                  <span className="text-slate-700">{money(order.shipping_minor, order.currency)}</span>
+                </div>
+              )}
+              {order.tax_minor > 0 && (
+                <div className="flex justify-between px-3 py-2">
+                  <span className="text-slate-500">Tax</span>
+                  <span className="text-slate-700">{money(order.tax_minor, order.currency)}</span>
+                </div>
+              )}
+              <div className="flex justify-between px-3 py-2.5 bg-white">
+                <span className="font-bold text-slate-900">Total</span>
+                <span className="font-bold text-slate-900">{money(order.total_minor, order.currency)}</span>
               </div>
-            ))}
+            </div>
           </div>
         </section>
 

@@ -1,9 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraphql } from "@/services/shopify/client";
+import { redis } from "@/lib/redis";
 
-type ShopifyOrder = { id: string; legacyResourceId: string; name: string; email: string | null; phone: string | null; displayFinancialStatus: string; displayFulfillmentStatus: string; cancelledAt: string | null; closedAt: string | null; createdAt: string; updatedAt: string; note: string | null; currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; currentTotalDiscountsSet: { shopMoney: { amount: string } }; currentShippingPriceSet: { shopMoney: { amount: string } }; currentTotalTaxSet: { shopMoney: { amount: string } }; currentTotalPriceSet: { shopMoney: { amount: string } }; shippingAddress: Record<string,string> | null; billingAddress: Record<string,string> | null; lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; originalTotalSet: { shopMoney: { amount: string } }; product: { id: string } | null; variant: { id: string } | null }> } };
+type ShopifyOrder = { id: string; legacyResourceId: string; name: string; email: string | null; phone: string | null; displayFinancialStatus: string; displayFulfillmentStatus: string; cancelledAt: string | null; closedAt: string | null; createdAt: string; updatedAt: string; note: string | null; currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; currentTotalDiscountsSet: { shopMoney: { amount: string } }; currentShippingPriceSet: { shopMoney: { amount: string } }; currentTotalTaxSet: { shopMoney: { amount: string } }; currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; shippingAddress: Record<string,string> | null; billingAddress: Record<string,string> | null; lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; originalTotalSet: { shopMoney: { amount: string } }; product: { id: string } | null; variant: { id: string } | null }> } };
 const minor = (amount: string) => Math.round(Number(amount) * 100);
-const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id } } }`;
+const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } }`;
 
 type OrderPage = {
   orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
@@ -18,7 +19,7 @@ export class ShopifySyncService {
     let synchronized = 0;
 
     do {
-      const result = await shopifyGraphql<OrderPage>(
+      const result: OrderPage = await shopifyGraphql<OrderPage>(
         shopId,
         `query Orders($query:String!, $cursor:String) {
           orders(first:250, query:$query, after:$cursor, sortKey:UPDATED_AT, reverse:true) {
@@ -117,9 +118,22 @@ export class ShopifySyncService {
         quantity: item.quantity,
         unit_price_minor: minor(item.originalUnitPriceSet.shopMoney.amount),
         total_price_minor: minor(item.originalTotalSet.shopMoney.amount),
-        product_snapshot: item
+        product_snapshot: {
+          ...item,
+          // Persist image URL directly in snapshot for display without re-fetching
+          image: (item as unknown as { variant?: { image?: { url?: string; altText?: string } } }).variant?.image ?? null,
+        }
       })));
       if (lineError) throw lineError;
+    }
+    
+    // Invalidate counts cache for this shop since order state changed
+    if (redis) {
+      try {
+        await redis.del(`counts:${shopId}`);
+      } catch (err) {
+        console.warn("Failed to invalidate Redis cache:", err);
+      }
     }
   }
 }

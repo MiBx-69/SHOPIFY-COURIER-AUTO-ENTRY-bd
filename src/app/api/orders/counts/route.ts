@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser, apiError } from "@/lib/api/auth";
+import { redis } from "@/lib/redis";
 
 export async function GET(request: NextRequest) {
   try {
     const { supabase } = await currentUser();
     const shopId = request.nextUrl.searchParams.get("shopId");
     if (!shopId) return NextResponse.json({ error: "shopId required" }, { status: 400 });
+
+    const cacheKey = `counts:${shopId}`;
+    if (redis) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          return NextResponse.json({ data: cached });
+        }
+      } catch (err) {
+        console.warn("Redis cache read error:", err);
+      }
+    }
 
     const { data: skipEvents, error: skipError } = await supabase.from("order_events")
       .select("order_id, event_type, occurred_at").eq("shop_id", shopId)
@@ -38,7 +51,7 @@ export async function GET(request: NextRequest) {
       if (result.error) throw result.error;
     }
 
-    return NextResponse.json({ data: {
+    const data = {
       all: allRes.count || 0,
       ready: Math.max(0, (readyRes.count || 0) - skippedCount),
       unfulfilled: Math.max(0, (unfulfilledRes.count || 0) - skippedCount),
@@ -51,7 +64,17 @@ export async function GET(request: NextRequest) {
       partially_fulfilled: partialRes.count || 0,
       fulfilled: fulfilledRes.count || 0,
       cancelled: cancelledRes.count || 0
-    }});
+    };
+
+    if (redis) {
+      try {
+        await redis.setex(cacheKey, 60, JSON.stringify(data));
+      } catch (err) {
+        console.warn("Redis cache write error:", err);
+      }
+    }
+
+    return NextResponse.json({ data });
   } catch (error) {
     return apiError(error);
   }

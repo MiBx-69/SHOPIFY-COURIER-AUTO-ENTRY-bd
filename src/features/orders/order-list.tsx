@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { 
@@ -231,6 +231,8 @@ export function OrderList({
     summary: { total: number; success: number; failed: number; skipped?: number; unsupported?: number };
     results: BulkResultItem[];
   } | null>(null);
+
+  const [isPending, startTransition] = useTransition();
 
   const selectedSet = useMemo(() => new Set(selected), [selected]);
 
@@ -724,8 +726,11 @@ export function OrderList({
               type="text"
               value={search}
               onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(0);
+                const val = e.target.value;
+                setSearch(val);
+                startTransition(() => {
+                  setPage(0);
+                });
               }}
               placeholder={isDispatchedMode ? "Search dispatched orders, tracking, customer..." : "Search orders, customer, phone, SKU..."}
               className="h-8.5 w-full min-w-0 rounded-lg border border-slate-200 bg-slate-50/60 pl-8 pr-7 text-xs text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:bg-white focus:outline-none transition-colors"

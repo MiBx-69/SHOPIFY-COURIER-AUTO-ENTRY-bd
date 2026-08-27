@@ -17,9 +17,11 @@ const csp = [
   "default-src 'self'",
   scriptSrc,
   "style-src 'self' 'unsafe-inline'",
+  // data: for inline product images, https: for Shopify CDN images and Telegram API
   "img-src 'self' data: https:",
   // wss: required for Supabase Realtime WebSocket connections
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.myshopify.com",
+  // api.telegram.org required for Telegram bot alert delivery (server-side fetch, but kept for safety)
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.myshopify.com https://api.telegram.org",
   frameAncestors,
   "base-uri 'self'",
   "form-action 'self'"
@@ -37,7 +39,12 @@ const nextConfig: NextConfig = {
       { key: "X-Content-Type-Options", value: "nosniff" },
       { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
       { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
-      { key: "Content-Security-Policy", value: csp }
+      { key: "Content-Security-Policy", value: csp },
+      // HSTS: force HTTPS for 1 year including subdomains (production only)
+      // Do not set this in development — it would break local http:// access
+      ...(process.env.NODE_ENV === "production"
+        ? [{ key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" }]
+        : [])
     ]
   }]
 };

@@ -4,6 +4,29 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { bulkDispatchSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
 
+// ─── Concurrency-limited pool ─────────────────────────────────────────────────
+// Runs `handler` for each item but limits simultaneous executions to `concurrency`.
+async function runWithConcurrency<TItem, TResult>(
+  items: TItem[],
+  concurrency: number,
+  handler: (item: TItem) => Promise<TResult>
+): Promise<TResult[]> {
+  const results: TResult[] = new Array(items.length);
+  let idx = 0;
+
+  async function worker() {
+    while (idx < items.length) {
+      const current = idx++;
+      results[current] = await handler(items[current]);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, worker)
+  );
+  return results;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { user, supabase } = await currentUser();
@@ -27,10 +50,13 @@ export async function POST(request: NextRequest) {
 
     const { data: shops } = await admin
       .from("shops")
-      .select("id")
+      .select("id, organization_id")
       .in("organization_id", authorizedOrgIds);
 
     const authorizedShopIds = new Set((shops || []).map((s: { id: string }) => s.id));
+    const shopOrgMap = new Map(
+      (shops || []).map((s: { id: string; organization_id: string }) => [s.id, s.organization_id])
+    );
 
     type OrderRecord = {
       id: string;
@@ -50,52 +76,42 @@ export async function POST(request: NextRequest) {
       .select("id, name, shop_id, customer_phone, shipping_address, dispatch_status, cancelled_at, total_minor, currency")
       .in("id", input.orderIds);
 
-    const orderMap = new Map((((orders || []) as unknown) as OrderRecord[]).map((o) => [o.id, o]));
+    const orderMap = new Map(
+      (((orders || []) as unknown) as OrderRecord[]).map((o) => [o.id, o])
+    );
     const dispatchService = new DispatchService();
 
-    // 3. Process each order safely with independent error containment
-    const results = await Promise.all(
-      input.orderIds.map(async (orderId) => {
+    type OrderResult = {
+      orderId: string;
+      orderName: string;
+      status: "dispatched" | "failed" | "skipped";
+      trackingId?: string;
+      courierName?: string;
+      reason?: string;
+    };
+
+    // 3. Process orders with controlled concurrency (max 5 simultaneous)
+    const results = await runWithConcurrency<string, OrderResult>(
+      input.orderIds,
+      5,
+      async (orderId) => {
         const order = orderMap.get(orderId);
 
-        // Security check: order must exist and belong to an authorized shop
+        // Security: order must exist and belong to an authorized shop
         if (!order || !authorizedShopIds.has(order.shop_id)) {
-          return {
-            orderId,
-            orderName: order?.name || "Order",
-            status: "failed" as const,
-            reason: "Order not found or unauthorized"
-          };
+          return { orderId, orderName: order?.name || "Order", status: "failed", reason: "Order not found or unauthorized" };
         }
 
-        // Check if cancelled
         if (order.cancelled_at) {
-          return {
-            orderId,
-            orderName: order.name,
-            status: "skipped" as const,
-            reason: "Order is cancelled in Shopify"
-          };
+          return { orderId, orderName: order.name, status: "skipped", reason: "Order is cancelled in Shopify" };
         }
 
-        // Check if already dispatched
         if (order.dispatch_status === "dispatched") {
-          return {
-            orderId,
-            orderName: order.name,
-            status: "skipped" as const,
-            reason: "Already dispatched"
-          };
+          return { orderId, orderName: order.name, status: "skipped", reason: "Already dispatched" };
         }
 
-        // Validate essential delivery details
         if (!order.customer_phone || !order.shipping_address) {
-          return {
-            orderId,
-            orderName: order.name,
-            status: "failed" as const,
-            reason: "Missing phone number or delivery address"
-          };
+          return { orderId, orderName: order.name, status: "failed", reason: "Missing phone number or delivery address" };
         }
 
         // Claim dispatch lock idempotently via Supabase RPC
@@ -106,15 +122,9 @@ export async function POST(request: NextRequest) {
         });
 
         if (claimError || !claim) {
-          return {
-            orderId,
-            orderName: order.name,
-            status: "skipped" as const,
-            reason: "Dispatch already in progress or already processed"
-          };
+          return { orderId, orderName: order.name, status: "skipped", reason: "Dispatch already in progress or already processed" };
         }
 
-        // Execute courier dispatch with pickup location
         try {
           const execution = await dispatchService.execute(
             claim.id,
@@ -124,12 +134,7 @@ export async function POST(request: NextRequest) {
           );
 
           if (!execution.success) {
-            return {
-              orderId,
-              orderName: order.name,
-              status: "failed" as const,
-              reason: execution.error || "Courier rejected shipment creation"
-            };
+            return { orderId, orderName: order.name, status: "failed", reason: execution.error || "Courier rejected shipment creation" };
           }
 
           return {
@@ -137,7 +142,7 @@ export async function POST(request: NextRequest) {
             orderName: order.name,
             status: "dispatched" as const,
             trackingId: execution.trackingId,
-            courierName: execution.courierName
+            courierName: execution.courierName,
           };
         } catch (execErr) {
           return {
@@ -147,12 +152,48 @@ export async function POST(request: NextRequest) {
             reason: execErr instanceof Error ? execErr.message : "Dispatch execution failed"
           };
         }
-      })
+      }
     );
+
+    // 4. Re-query DB for authoritative dispatched count — never trust client-side totals
+    const { count: dbDispatchedCount } = await admin
+      .from("orders")
+      .select("id", { count: "exact", head: true })
+      .in("id", input.orderIds)
+      .eq("dispatch_status", "dispatched");
 
     const dispatched = results.filter((r) => r.status === "dispatched").length;
     const failed = results.filter((r) => r.status === "failed").length;
     const skipped = results.filter((r) => r.status === "skipped").length;
+
+    // 5. Audit log for bulk dispatch (non-blocking)
+    const shopId = orderMap.get(input.orderIds[0])?.shop_id;
+    const orgId = shopId ? shopOrgMap.get(shopId) : undefined;
+    if (shopId && orgId) {
+      (async () => {
+        try {
+          const { invalidateCountsCache } = await import("@/lib/redis");
+          await invalidateCountsCache([shopId]);
+          
+          await admin.from("audit_logs").insert({
+            organization_id: orgId,
+            shop_id: shopId,
+            actor_id: user.id,
+            action: "dispatch.bulk",
+            entity_type: "order",
+            metadata: {
+              total: results.length,
+              dispatched,
+              failed,
+              skipped,
+              db_confirmed_dispatched: dbDispatchedCount ?? dispatched,
+              courier_config_id: input.courierConfigId ?? null,
+              pickup_location_id: input.pickupLocationId ?? null,
+            },
+          });
+        } catch {}
+      })();
+    }
 
     return NextResponse.json({
       data: results,
@@ -160,7 +201,9 @@ export async function POST(request: NextRequest) {
         total: results.length,
         dispatched,
         failed,
-        skipped
+        skipped,
+        // DB-confirmed count is the authoritative source of truth
+        dbConfirmedDispatched: dbDispatchedCount ?? dispatched,
       }
     });
   } catch (error) {

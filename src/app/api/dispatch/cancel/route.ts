@@ -32,10 +32,11 @@ export async function POST(request: NextRequest) {
 
     const { data: shops } = await admin
       .from("shops")
-      .select("id")
+      .select("id, organization_id")
       .in("organization_id", authorizedOrgIds);
 
     const authorizedShopIds = new Set((shops || []).map((s: { id: string }) => s.id));
+    const shopOrgMap = new Map((shops || []).map((s: { id: string; organization_id: string }) => [s.id, s.organization_id]));
 
     // 2. Fetch orders
     const { data: orders } = await admin
@@ -83,6 +84,36 @@ export async function POST(request: NextRequest) {
     const cancelledCount = results.filter((r) => r.status === "cancelled").length;
     const unsupportedCount = results.filter((r) => r.status === "unsupported").length;
     const failedCount = results.filter((r) => r.status === "failed").length;
+
+    (async () => {
+      try {
+        const auditRecords = results.map(r => {
+          const order = orderMap.get(r.orderId);
+          if (!order) return null;
+          return {
+            organization_id: shopOrgMap.get(order.shop_id),
+            shop_id: order.shop_id,
+            actor_id: user.id,
+            action: "dispatch.cancel",
+            entity_type: "order",
+            entity_id: r.orderId,
+            metadata: {
+              status: r.status,
+              reason: body.reason,
+              error_reason: "reason" in r ? r.reason : undefined
+            }
+          };
+        }).filter(r => r && r.organization_id);
+        if (auditRecords.length) await admin.from("audit_logs").insert(auditRecords);
+        
+        // Invalidate Redis cache for affected shops
+        const { invalidateCountsCache } = await import("@/lib/redis");
+        const shopIdsToInvalidate = Array.from(new Set(results.map((r) => orderMap.get(r.orderId)?.shop_id).filter(Boolean))) as string[];
+        if (shopIdsToInvalidate.length > 0) {
+          await invalidateCountsCache(shopIdsToInvalidate);
+        }
+      } catch {}
+    })();
 
     return NextResponse.json({
       data: results,

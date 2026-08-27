@@ -52,6 +52,25 @@ export function AppShell({ active, children }: { active: string; children: React
         </nav>
       </aside>
 
+      {/* Mobile Top Header (Visible only on small screens) */}
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur md:hidden shadow-xs">
+        <Link href="/orders" className="flex items-center gap-2">
+          <Image
+            src="/logo.png"
+            alt="MiBx-Dispatch Logo"
+            width={24}
+            height={24}
+            className="size-6 rounded object-contain border border-slate-200/70"
+            priority
+          />
+          <div className="flex flex-col leading-none">
+            <span className="font-bold text-slate-900 text-xs">MiBx-Dispatch</span>
+            <span className="text-[9px] text-slate-400 font-medium">Logistics Terminal</span>
+          </div>
+        </Link>
+        {/* Placeholder for Store name or Settings trigger if needed */}
+      </header>
+
       {/* Main Content Area */}
       <main className="w-full min-w-0 flex-1 px-2.5 sm:px-4 md:px-6 lg:px-8 pt-2.5 sm:pt-4 pb-28 md:pb-8">
         <div className="mx-auto w-full max-w-6xl min-w-0">

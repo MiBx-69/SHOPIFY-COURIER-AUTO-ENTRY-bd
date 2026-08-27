@@ -9,11 +9,39 @@ export async function shopifyGraphql<T>(shopId: string, query: string, variables
   const { data: installation, error } = await admin.from("shopify_installations").select("access_token_ciphertext,access_token_iv,access_token_tag").eq("shop_id", shopId).single();
   if (error || !installation) throw new Error("Shopify is not connected");
   const token = decryptSecret({ ciphertext: installation.access_token_ciphertext, iv: installation.access_token_iv, authTag: installation.access_token_tag }).accessToken;
-  const response = await fetch(`https://${shop.shop_domain}/admin/api/${serverEnv().SHOPIFY_API_VERSION}/graphql.json`, { method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(20_000) });
-  if (!response.ok) throw new Error(`Shopify request failed (${response.status})`);
-  const result = await response.json() as { data?: T; errors?: Array<{ message: string }> };
-  if (result.errors?.length || !result.data) throw new Error(result.errors?.[0]?.message || "Shopify returned no data");
-  return result.data;
+  
+  let attempts = 0;
+  const maxAttempts = 5;
+  while (attempts < maxAttempts) {
+    attempts++;
+    const response = await fetch(`https://${shop.shop_domain}/admin/api/${serverEnv().SHOPIFY_API_VERSION}/graphql.json`, { method: "POST", headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token }, body: JSON.stringify({ query, variables }), signal: AbortSignal.timeout(20_000) });
+    
+    if (response.status === 429) {
+      const retryAfter = response.headers.get("Retry-After");
+      const delayMs = retryAfter ? parseInt(retryAfter) * 1000 : Math.pow(2, attempts) * 1000;
+      console.warn(`Shopify Rate Limit (429) hit. Retrying in ${delayMs}ms (Attempt ${attempts} of ${maxAttempts})`);
+      if (attempts >= maxAttempts) throw new Error("Shopify API rate limit exceeded");
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+    
+    if (!response.ok) throw new Error(`Shopify request failed (${response.status})`);
+    
+    const result = await response.json() as { data?: T; errors?: Array<{ message: string }> };
+    if (result.errors?.length || !result.data) {
+      // Sometimes Shopify throws throttling as a GraphQL error: "Throttled"
+      const isThrottled = result.errors?.some(e => e.message.toLowerCase().includes("throttle"));
+      if (isThrottled && attempts < maxAttempts) {
+        const delayMs = Math.pow(2, attempts) * 1000;
+        console.warn(`Shopify GraphQL Throttle hit. Retrying in ${delayMs}ms (Attempt ${attempts} of ${maxAttempts})`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw new Error(result.errors?.[0]?.message || "Shopify returned no data");
+    }
+    return result.data;
+  }
+  throw new Error("Shopify request failed after retries");
 }
 
 export async function updateShopifyDispatchMetafields(shopId: string, orderGid: string, dispatch: { courier: string; trackingId: string; reference?: string; dispatchedAt: string }) {

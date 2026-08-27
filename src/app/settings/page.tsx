@@ -8,17 +8,25 @@ import { CourierSettings, type CourierConfig } from "@/features/settings/courier
 import { DispatchSettings } from "@/features/settings/dispatch-settings";
 import { IntegrationAuditLog } from "@/features/settings/integration-audit-log";
 import { PasskeyManager } from "@/features/settings/passkey-manager";
+import { SecuritySettings } from "@/features/settings/security-settings";
+import { TeamSettings } from "@/features/settings/team-settings";
+import { TelegramSettings } from "@/features/settings/telegram-settings";
+import { SystemHealth } from "@/features/settings/system-health";
+import { SettingsTabs } from "@/features/settings/settings-tabs";
 
 export const metadata = { title: "Settings | MiBx-Dispatch" };
 
-export default async function SettingsPage() {
-  // Auth: use SSR client to get verified user identity
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const supabase = await createServerSupabaseClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Privileged data fetch via admin client (bypasses RLS where needed for settings)
   const admin = createAdminClient();
+  const { tab: activeTab = "shopify" } = await searchParams;
 
   // Fetch shops this user belongs to (RLS on shops respects membership)
   const { data: shops } = await supabase
@@ -28,7 +36,17 @@ export default async function SettingsPage() {
 
   const shop = shops?.[0] ?? null;
 
-  // Fetch full installation details (admin client — shopify_installations is not RLS-exposed to auth)
+  // Fetch membership & role
+  const { data: membership } = shop
+    ? await admin
+        .from("memberships")
+        .select("role")
+        .eq("user_id", user.id)
+        .limit(1)
+        .maybeSingle()
+    : { data: null };
+
+  // Fetch full installation details (admin client — shopify_installations is not RLS-exposed)
   let installation: {
     scopes: string[];
     api_version: string | null;
@@ -55,32 +73,69 @@ export default async function SettingsPage() {
     webhooksCount = wCount || 0;
   }
 
-  // Fetch courier configs with health fields
+  // Courier configs
   const courierConfigs: CourierConfig[] = [];
   if (shop) {
     const { data: configs } = await supabase
       .from("courier_configs")
-      .select(`
-        id,enabled,priority,connection_status,
-        last_tested_at,last_test_latency_ms,last_error_message,
-        credentials_last_updated_at,courier_id,
-        couriers(provider,display_name)
-      `)
+      .select(`id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)`)
       .eq("shop_id", shop.id)
       .order("priority");
-
     courierConfigs.push(...((configs ?? []) as unknown as CourierConfig[]));
   }
 
-  // Fetch all available courier providers for the "add" flow
   const { data: allCouriers } = await supabase
     .from("couriers")
     .select("id,provider,display_name")
     .order("display_name");
 
+  // Team members
+  interface MemberRow {
+    id: string;
+    user_id: string;
+    role: string;
+    created_at: string;
+    profiles: any; // Supabase returns array or single object depending on relation
+  }
+  const members: Array<{ id: string; user_id: string; role: string; email?: string; full_name?: string; created_at: string }> = [];
+  if (shop) {
+    const { data: orgMemberships } = await admin
+      .from("memberships")
+      .select("id,user_id,role,created_at,profiles(full_name)")
+      .eq("organization_id", (await admin.from("shops").select("organization_id").eq("id", shop.id).single()).data?.organization_id ?? "");
+    if (orgMemberships) {
+      // Fetch emails via admin auth
+      for (const m of orgMemberships as MemberRow[]) {
+        const { data: authUser } = await admin.auth.admin.getUserById(m.user_id);
+        const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+        members.push({
+          id: m.id,
+          user_id: m.user_id,
+          role: m.role,
+          email: authUser?.user?.email,
+          full_name: profile?.full_name ?? undefined,
+          created_at: m.created_at,
+        });
+      }
+    }
+  }
+
+  // Recent security events for the current user
+  const { data: securityEvents } = await admin
+    .from("security_events")
+    .select("id,event_type,created_at,metadata")
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(8);
+
+  // Telegram configuration status (check env without exposing token)
+  const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);
+
   const shopWithInstallation = shop
     ? { ...shop, shopify_installations: installation, ordersCount, webhooksCount }
     : null;
+
+  const currentUserRole = membership?.role ?? "viewer";
 
   return (
     <AppShell active="Settings">
@@ -89,55 +144,32 @@ export default async function SettingsPage() {
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Settings</h1>
       </header>
 
-      <div className="space-y-8">
-        {/* ── Shopify Integration ────────────────────────────────────────── */}
-        <section>
-          <div className="mb-3">
-            <h2 className="text-base font-bold text-slate-900">Shopify</h2>
-            <p className="text-sm text-slate-500">
-              Manage your connected Shopify store.
-            </p>
-          </div>
-          {shopWithInstallation ? (
-            <ShopifyCard shop={shopWithInstallation} />
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
-              <p className="text-sm font-semibold text-slate-800">No Shopify store connected</p>
-              <p className="mt-1 text-sm text-slate-500">
-                Connect through Shopify OAuth — you never paste an Admin API token here.
-              </p>
-              <div className="mt-4">
-                <ShopifyConnect />
-              </div>
-            </div>
-          )}
-        </section>
-        
-        {/* ── Dispatch Settings ──────────────────────────────────────────── */}
-        {shop && (
+      <SettingsTabs activeTab={activeTab}>
+        {/* ── Shopify ─────────────────────────────────────────────────── */}
+        {activeTab === "shopify" && (
           <section>
-            <div className="mb-3">
-              <h2 className="text-base font-bold text-slate-900">Dispatch settings</h2>
-              <p className="text-sm text-slate-500">
-                Configure how and when orders are sent to couriers.
-              </p>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Shopify</h2>
+              <p className="text-sm text-slate-500">Manage your connected Shopify store.</p>
             </div>
-            <DispatchSettings 
-              shopId={shop.id}
-              initialAutomatic={Boolean(shop.automatic_courier)}
-              configs={courierConfigs as any} 
-            />
+            {shopWithInstallation ? (
+              <ShopifyCard shop={shopWithInstallation} />
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-6">
+                <p className="text-sm font-semibold text-slate-800">No Shopify store connected</p>
+                <p className="mt-1 text-sm text-slate-500">Connect through Shopify OAuth — you never paste an Admin API token here.</p>
+                <div className="mt-4"><ShopifyConnect /></div>
+              </div>
+            )}
           </section>
         )}
 
-        {/* ── Courier Integrations ───────────────────────────────────────── */}
-        {shop && (
+        {/* ── Couriers ────────────────────────────────────────────────── */}
+        {activeTab === "couriers" && shop && (
           <section>
-            <div className="mb-3">
-              <h2 className="text-base font-bold text-slate-900">Courier services</h2>
-              <p className="text-sm text-slate-500">
-                Credentials are encrypted with AES-256-GCM before storage and never returned to the browser.
-              </p>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Courier Services</h2>
+              <p className="text-sm text-slate-500">Credentials are encrypted with AES-256-GCM before storage and never returned to the browser.</p>
             </div>
             <CourierSettings
               shopId={shop.id}
@@ -147,34 +179,94 @@ export default async function SettingsPage() {
           </section>
         )}
 
-        {/* ── Account & Passkeys ─────────────────────────────────────────── */}
-        <section>
-          <div className="mb-3">
-            <h2 className="text-base font-bold text-slate-900">Account & Passkeys</h2>
-            <p className="text-sm text-slate-500">
-              Manage biometric passkeys (Touch ID, Face ID, Windows Hello, YubiKey) for fast, secure sign-in.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-2xs">
-            <PasskeyManager />
-          </div>
-        </section>
-
-        {/* ── Integration Audit Log ─────────────────────────────────────── */}
-        {shop && (
+        {/* ── Dispatch ────────────────────────────────────────────────── */}
+        {activeTab === "dispatch" && shop && (
           <section>
-            <div className="mb-3">
-              <h2 className="text-base font-bold text-slate-900">Integration history</h2>
-              <p className="text-sm text-slate-500">
-                Recent credential and connection events for this store. No credential values are stored here.
-              </p>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Dispatch Settings</h2>
+              <p className="text-sm text-slate-500">Configure how and when orders are sent to couriers.</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4">
+            <DispatchSettings
+              shopId={shop.id}
+              initialAutomatic={Boolean(shop.automatic_courier)}
+              configs={courierConfigs as any}
+            />
+          </section>
+        )}
+
+        {/* ── Notifications ───────────────────────────────────────────── */}
+        {activeTab === "notifications" && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Notifications</h2>
+              <p className="text-sm text-slate-500">Configure error alerting and monitoring.</p>
+            </div>
+            <TelegramSettings shopId={shop?.id ?? ""} isConfigured={telegramConfigured} />
+          </section>
+        )}
+
+        {/* ── Security ────────────────────────────────────────────────── */}
+        {activeTab === "security" && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Security</h2>
+              <p className="text-sm text-slate-500">Manage your account security, passkeys, and active sessions.</p>
+            </div>
+            <div className="space-y-5">
+              <SecuritySettings
+                email={user.email ?? ""}
+                recentEvents={securityEvents ?? []}
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-slate-700 mb-3">Passkeys</h3>
+                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-2xs">
+                  <PasskeyManager />
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* ── Team ────────────────────────────────────────────────────── */}
+        {activeTab === "team" && shop && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Team</h2>
+              <p className="text-sm text-slate-500">Manage who has access to your store workspace.</p>
+            </div>
+            <TeamSettings
+              shopId={shop.id}
+              members={members}
+              currentUserId={user.id}
+              currentUserRole={currentUserRole}
+            />
+          </section>
+        )}
+
+        {/* ── Logs ────────────────────────────────────────────────────── */}
+        {activeTab === "logs" && shop && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Integration History</h2>
+              <p className="text-sm text-slate-500">Recent credential and connection events. No credential values are stored.</p>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
               <IntegrationAuditLog shopId={shop.id} />
             </div>
           </section>
         )}
-      </div>
+
+        {/* ── System Health ────────────────────────────────────────────── */}
+        {activeTab === "health" && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">System Health</h2>
+              <p className="text-sm text-slate-500">Live status of all connected services.</p>
+            </div>
+            <SystemHealth />
+          </section>
+        )}
+      </SettingsTabs>
     </AppShell>
   );
 }

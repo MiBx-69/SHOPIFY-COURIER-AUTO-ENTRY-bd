@@ -34,7 +34,16 @@ const serverSchema = publicSchema.extend({
   // Optional — can be overridden per-credential via the Settings UI instead.
   REDX_API_URL: emptyToUndefined(z.string().url().optional()),
   PATHAO_API_URL: emptyToUndefined(z.string().url().optional()),
-  STEADFAST_API_URL: emptyToUndefined(z.string().url().optional())
+  STEADFAST_API_URL: emptyToUndefined(z.string().url().optional()),
+
+  // ── Telegram Alerting ───────────────────────────────────────────────────
+  // Optional — configure in Settings → Notifications to enable Telegram alerts.
+  TELEGRAM_BOT_TOKEN: emptyToUndefined(z.string().min(10).optional()),
+  TELEGRAM_CHAT_ID: emptyToUndefined(z.string().min(1).optional()),
+
+  // ── Redis Caching ───────────────────────────────────────────────────────
+  UPSTASH_REDIS_REST_URL: emptyToUndefined(z.string().url().optional()),
+  UPSTASH_REDIS_REST_TOKEN: emptyToUndefined(z.string().min(1).optional())
 }).refine(
   (d) => Boolean(d.SUPABASE_SECRET_KEY || d.SUPABASE_SERVICE_ROLE_KEY),
   { message: "SUPABASE_SECRET_KEY (or SUPABASE_SERVICE_ROLE_KEY) must be set in .env.local" }

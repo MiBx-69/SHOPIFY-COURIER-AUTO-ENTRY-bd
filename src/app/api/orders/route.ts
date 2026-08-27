@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
       .from("orders")
       .select(
         "id,name,order_number,customer_name,customer_phone,customer_email,shipping_address,billing_address,note,total_minor,subtotal_minor,discount_minor,shipping_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor),dispatches(id,status,phase,tracking_id,courier_reference,courier_status,safe_error_message,dispatched_at,courier_configs(id,couriers(provider,display_name)))",
-        { count: "exact" }
+        { count: "estimated" }
       )
       .eq("shop_id", shopId)
       .order("shopify_created_at", { ascending: false, nullsFirst: false })
