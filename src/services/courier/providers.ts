@@ -226,7 +226,8 @@ export class PathaoProvider implements CourierProvider {
   }
 
   private baseUrl(c: Record<string, string>) {
-    return base(c, process.env.PATHAO_API_URL || "https://api-hermes.pathao.com");
+    const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
+    return isSandbox ? "https://api-hermes-sandbox.pathao.com" : "https://api-hermes.pathao.com";
   }
 
   private async token(c: Record<string, string>) {
@@ -298,9 +299,6 @@ export class PathaoProvider implements CourierProvider {
       // Resolve store_id
       let chosenStoreId = Number(p.pickupLocationId);
       if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
-        chosenStoreId = Number(c.storeId);
-      }
-      if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
         // Fallback: fetch available stores to find the first valid integer store_id
         try {
           const locations = await this.getPickupLocations(c);
@@ -341,8 +339,8 @@ export class PathaoProvider implements CourierProvider {
       const payload = {
         store_id: chosenStoreId,
         merchant_order_id: String(p.orderNumber || p.orderId).replace(/[^a-zA-Z0-9_-]/g, "") || String(p.orderId),
-        sender_name: c.senderName || "Merchant",
-        sender_phone: normalizeBdPhone(c.senderPhone) || "01700000000",
+        sender_name: "Merchant",
+        sender_phone: "01700000000",
         recipient_name: p.customerName || "Customer",
         recipient_phone: phone,
         recipient_address: address,
@@ -409,7 +407,8 @@ export class SteadfastProvider implements CourierProvider {
   }
 
   private baseUrl(c: Record<string, string>) {
-    return base(c, process.env.STEADFAST_API_URL || "https://portal.steadfast.com.bd");
+    const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
+    return isSandbox ? "https://sandbox.steadfast.com.bd" : "https://portal.steadfast.com.bd";
   }
 
   private headers(c: Record<string, string>) {
@@ -457,7 +456,7 @@ export class SteadfastProvider implements CourierProvider {
 
       const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
 
-      const { response, data } = await courierFetch(`${base(c, process.env.STEADFAST_API_URL)}/api/v1/create_order`, {
+      const { response, data } = await courierFetch(`${this.baseUrl(c)}/api/v1/create_order`, {
         method: "POST",
         headers: { ...this.headers(c), "Idempotency-Key": key },
         body: JSON.stringify({
@@ -488,7 +487,7 @@ export class SteadfastProvider implements CourierProvider {
   }
 
   async getTracking(trackingId: string, c: Record<string, string>) {
-    const { response, data } = await courierFetch(`${base(c, process.env.STEADFAST_API_URL)}/api/v1/status_by_trackingcode/${encodeURIComponent(trackingId)}`, {
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/api/v1/status_by_trackingcode/${encodeURIComponent(trackingId)}`, {
       headers: this.headers(c)
     });
     if (!response.ok) throw new Error("Unable to fetch Steadfast tracking");

@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { CheckCircle2, XCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, Loader2, MapPin, Check } from "lucide-react";
+import { CheckCircle2, XCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, Loader2, MapPin, Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SecretInput } from "@/components/ui/secret-input";
 import { StatusBadge, type IntegrationStatus } from "@/components/ui/status-badge";
