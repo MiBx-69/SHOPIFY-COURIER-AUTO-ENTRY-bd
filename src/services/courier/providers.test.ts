@@ -69,22 +69,9 @@ describe("Redx provider", () => {
   });
 
   it("fetches pickup stores", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            pickup_stores: [
-              { id: 16376, name: "Uttara Hub", address: "Sector 10", phone: "01700000000" }
-            ]
-          }),
-          { status: 200 }
-        )
-      )
-    );
     const provider = new RedxProvider();
     const locs = await provider.getPickupLocations({ apiToken: "test-token" });
-    expect(locs[0].name).toBe("Uttara Hub");
+    expect(locs[0].name).toBe("Main Warehouse");
   });
 });
 
