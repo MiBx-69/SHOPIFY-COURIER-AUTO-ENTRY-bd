@@ -49,6 +49,13 @@ create table if not exists public.audit_logs (
   created_at timestamptz not null default now()
 );
 
+-- Ensure existing audit_logs table has the columns we expect
+alter table public.audit_logs add column if not exists actor_role text;
+alter table public.audit_logs add column if not exists target_user_id uuid references auth.users(id) on delete set null;
+alter table public.audit_logs add column if not exists target_organization_id uuid references public.organizations(id) on delete set null;
+alter table public.audit_logs add column if not exists metadata jsonb default '{}'::jsonb;
+alter table public.audit_logs add column if not exists ip_address text;
+
 -- 3. Update RLS Policies
 alter table public.organization_invitations enable row level security;
 alter table public.audit_logs enable row level security;
