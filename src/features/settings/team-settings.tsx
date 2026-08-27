@@ -46,7 +46,7 @@ function RoleIcon({ role }: { role: string }) {
 
 export function TeamSettings({ organizationId, members, invitations: initialInvitations, currentUserId, currentUserRole }: Props) {
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"manager" | "dispatcher" | "viewer" | "admin" | "staff">("staff");
+  const [inviteRole, setInviteRole] = useState<"manager" | "dispatcher" | "viewer" | "admin">("manager");
   const [inviteStatus, setInviteStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [inviteError, setInviteError] = useState("");
   const [invitations, setInvitations] = useState(initialInvitations);
@@ -209,7 +209,8 @@ export function TeamSettings({ organizationId, members, invitations: initialInvi
                 className="w-full appearance-none text-sm rounded-lg border border-slate-300 bg-white px-3 py-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-slate-900"
               >
                 {["owner", "developer"].includes(currentUserRole) && <option value="admin">Admin — full access except ownership</option>}
-                <option value="staff">Staff — standard access</option>
+                <option value="manager">Manager — standard access</option>
+                <option value="dispatcher">Dispatcher — manage dispatch only</option>
                 <option value="viewer">Viewer — read-only access</option>
               </select>
               <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
