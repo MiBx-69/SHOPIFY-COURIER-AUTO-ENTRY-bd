@@ -308,7 +308,7 @@ export class DispatchService {
     if (!dispatch) {
       const { data: order } = await admin.from("orders").select("id, shop_id, dispatch_status").eq("id", orderIdOrDispatchId).maybeSingle();
       if (!order) throw new Error("Order not found");
-      await admin.from("orders").update({ dispatch_status: "cancelled", updated_at: new Date().toISOString() }).eq("id", order.id);
+      await admin.from("orders").update({ dispatch_status: "not_dispatched", updated_at: new Date().toISOString() }).eq("id", order.id);
       await admin.from("order_events").insert({
         shop_id: order.shop_id,
         order_id: order.id,
@@ -363,7 +363,7 @@ export class DispatchService {
       updated_at: new Date().toISOString()
     }).eq("id", dispatch.id);
 
-    await admin.from("orders").update({ dispatch_status: "cancelled", updated_at: new Date().toISOString() }).eq("id", dispatch.order_id);
+    await admin.from("orders").update({ dispatch_status: "not_dispatched", updated_at: new Date().toISOString() }).eq("id", dispatch.order_id);
 
     await admin.from("order_events").insert({
       shop_id: dispatch.shop_id,

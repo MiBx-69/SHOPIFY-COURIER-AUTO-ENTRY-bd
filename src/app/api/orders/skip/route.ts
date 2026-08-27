@@ -44,6 +44,13 @@ export async function POST(request: NextRequest) {
     })));
     if (eventError) throw eventError;
 
+    const { error: updateError } = await admin.from("orders").update({
+      is_skipped: true,
+      dispatch_status: "not_dispatched",
+      updated_at: now
+    }).in("id", authorizedOrders.map((o: { id: string }) => o.id));
+    if (updateError) throw updateError;
+
     (async () => {
       try {
         const auditRecords = authorizedOrders.map((order: { id: string; shop_id: string }) => ({

@@ -42,7 +42,11 @@ export async function POST(request: NextRequest) {
     })));
     if (eventError) throw eventError;
 
-    const { error: updateError } = await admin.from("orders").update({ dispatch_status: "not_dispatched", updated_at: now }).in("id", authorizedOrders.map((o: { id: string }) => o.id));
+    const { error: updateError } = await admin.from("orders").update({ 
+      dispatch_status: "not_dispatched", 
+      is_skipped: false,
+      updated_at: now 
+    }).in("id", authorizedOrders.map((o: { id: string }) => o.id));
     if (updateError) throw updateError;
 
     (async () => {
