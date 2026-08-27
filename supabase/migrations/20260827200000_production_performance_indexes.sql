@@ -74,4 +74,4 @@ CREATE INDEX IF NOT EXISTS idx_courier_configs_shop_priority
 -- ─── Sync Jobs ──────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_sync_jobs_shop_status
   ON sync_jobs (shop_id, status, created_at DESC)
-  WHERE status = 'pending';
+  WHERE status = 'queued';
