@@ -65,7 +65,7 @@ function extractStorePage(payload: unknown): {
   // Pathao's normal response:
   // { data: { data: [...], current_page, last_page, ... } }
   const nestedStores = dataObject ? asArray(dataObject.data) : [];
-  if (nestedStores.length > 0) {
+  if (nestedStores.length > 0 && dataObject) {
     return {
       stores: nestedStores as PathaoStore[],
       currentPage: Number(dataObject.current_page) || undefined,
@@ -110,7 +110,7 @@ function mapStore(store: PathaoStore): PickupLocation | null {
     id: providerId,
     courierLocationId: providerId,
     name: String(store.store_name ?? store.name ?? `Pathao Store #${providerId}`).trim(),
-    address: String(store.store_address ?? store.address ?? "").trim() || undefined,
+    address: String(store.store_address ?? store.address ?? "").trim(),
     phone: String(store.store_phone ?? store.contact_number ?? store.phone ?? "").trim() || undefined,
     city: String(store.city_name ?? "").trim() || undefined,
     area: String(store.area_name ?? store.zone_name ?? "").trim() || undefined,
