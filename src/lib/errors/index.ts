@@ -88,7 +88,7 @@ export function classifyError(error: unknown): {
     };
   }
 
-  const msg = error instanceof Error ? error.message : String(error);
+  const msg = error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error));
   const msgLower = msg.toLowerCase();
 
   // Rate limit
@@ -207,7 +207,7 @@ export function buildApiError(
     userId: context?.userId,
     orderId: context?.orderId,
     courier: context?.courier,
-    internalMessage: error instanceof Error ? error.message : String(error),
+    internalMessage: error instanceof Error ? error.message : (typeof error === 'object' ? JSON.stringify(error) : String(error)),
   };
 
   logStructured(structured);

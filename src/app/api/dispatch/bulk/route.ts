@@ -155,13 +155,6 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    // 4. Re-query DB for authoritative dispatched count — never trust client-side totals
-    const { count: dbDispatchedCount } = await admin
-      .from("orders")
-      .select("id", { count: "exact", head: true })
-      .in("id", input.orderIds)
-      .eq("dispatch_status", "dispatched");
-
     const dispatched = results.filter((r) => r.status === "dispatched").length;
     const failed = results.filter((r) => r.status === "failed").length;
     const skipped = results.filter((r) => r.status === "skipped").length;
@@ -186,7 +179,6 @@ export async function POST(request: NextRequest) {
               dispatched,
               failed,
               skipped,
-              db_confirmed_dispatched: dbDispatchedCount ?? dispatched,
               courier_config_id: input.courierConfigId ?? null,
               pickup_location_id: input.pickupLocationId ?? null,
             },
@@ -202,8 +194,6 @@ export async function POST(request: NextRequest) {
         dispatched,
         failed,
         skipped,
-        // DB-confirmed count is the authoritative source of truth
-        dbConfirmedDispatched: dbDispatchedCount ?? dispatched,
       }
     });
   } catch (error) {

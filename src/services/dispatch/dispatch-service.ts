@@ -341,21 +341,30 @@ export class DispatchService {
       const provider = courierRegistry.get(providerName);
 
       if (!provider.cancelShipment) {
-        throw new Error(`Courier cancellation is not supported for ${providerName.toUpperCase()} shipments.`);
+        // RedX does not support API cancellation. Bypass courier API and cancel locally.
+        console.warn(`Courier cancellation is not supported for ${providerName.toUpperCase()} shipments. Proceeding with local cancellation.`);
+      } else {
+        const { data: secret } = await admin
+          .from("courier_secrets")
+          .select("ciphertext,iv,auth_tag")
+          .eq("courier_config_id", courierConfig.id)
+          .single();
+
+        if (!secret) {
+          throw new Error("Courier credentials not found to cancel shipment");
+        }
+
+        const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
+        
+        try {
+          await provider.cancelShipment(trackingId, credentials);
+        } catch (courierErr) {
+          // If courier fails, we might still want to cancel locally? The user said "Cancel Dispatch MUST bypass...".
+          // If the provider supports it but it fails, we throw to avoid desync, unless the user forces it.
+          // But for now, we just throw if the API call fails.
+          throw courierErr;
+        }
       }
-
-      const { data: secret } = await admin
-        .from("courier_secrets")
-        .select("ciphertext,iv,auth_tag")
-        .eq("courier_config_id", courierConfig.id)
-        .single();
-
-      if (!secret) {
-        throw new Error("Courier credentials not found to cancel shipment");
-      }
-
-      const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
-      await provider.cancelShipment(trackingId, credentials);
 
       if (shipment?.id) {
         await admin.from("courier_shipments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", shipment.id as string);

@@ -685,12 +685,9 @@ function EmptyCourierCard({
       });
       if (res.ok) {
         const json = await res.json();
-        if (json.data?.id) {
-          window.location.reload();
-        } else {
-          window.location.reload();
-        }
-        window.location.reload();
+        setConfiguring(false);
+        setFormValues({});
+        router.refresh();
       } else {
         const json = (await res.json()) as { error?: string };
         setErrorMsg(json.error ?? "Failed to configure courier");

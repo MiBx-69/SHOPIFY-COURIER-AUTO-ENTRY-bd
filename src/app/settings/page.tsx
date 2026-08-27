@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
+import { Suspense } from "react";
 import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -49,28 +50,12 @@ export default async function SettingsPage({
 
   const shop = shops?.[0] ?? null;
 
-  // Parallelize the queries that depend on `shop`
+  // Fetch shop and membership role
   let membership: { role: string } | null = null;
-  const courierConfigs: CourierConfig[] = [];
-  let allCouriers: any[] = [];
-
-  const [membershipRes, courierConfigsRes, allCouriersRes] = await Promise.all([
-    shop ? admin.from("memberships").select("role").eq("user_id", user.id).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-    ((activeTab === "couriers" || activeTab === "dispatch") && shop)
-      ? supabase
-          .from("courier_configs")
-          .select(`id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)`)
-          .eq("shop_id", shop.id)
-          .order("priority")
-      : Promise.resolve({ data: [] }),
-    activeTab === "couriers" ? getAllCouriers() : Promise.resolve([])
-  ]);
-
-  membership = membershipRes.data;
-  if (courierConfigsRes.data) {
-    courierConfigs.push(...(courierConfigsRes.data as unknown as CourierConfig[]));
+  if (shop) {
+    const { data } = await admin.from("memberships").select("role").eq("user_id", user.id).limit(1).maybeSingle();
+    membership = data;
   }
-  allCouriers = allCouriersRes;
 
   // Fetch full installation details (admin client — shopify_installations is not RLS-exposed)
   let installation: {
@@ -99,56 +84,7 @@ export default async function SettingsPage({
     webhooksCount = wCount || 0;
   }
 
-  // Team members
-  interface MemberRow {
-    id: string;
-    user_id: string;
-    role: string;
-    created_at: string;
-    profiles: any; // Supabase returns array or single object depending on relation
-  }
-  const members: Array<{ id: string; user_id: string; role: string; email?: string; full_name?: string; created_at: string }> = [];
-  const invitations: Array<{ id: string; email: string; role: string; status: string; created_at: string; expires_at: string }> = [];
-  
-  if (activeTab === "team" && shop) {
-    const orgId = shop.organization_id;
-    
-    // Fetch memberships, invitations, and users in parallel
-    const [{ data: orgMemberships }, { data: orgInvitations }, { data: { users } }] = await Promise.all([
-      admin
-        .from("memberships")
-        .select("id,user_id,role,created_at,profiles(full_name)")
-        .eq("organization_id", orgId),
-      supabase
-        .from("organization_invitations")
-        .select("id, email, role, status, created_at, expires_at")
-        .eq("organization_id", orgId)
-        .neq("status", "accepted")
-        .order("created_at", { ascending: false }),
-      admin.auth.admin.listUsers({ perPage: 1000 })
-    ]);
-      
-    if (orgMemberships) {
-      const userMap = new Map(users.map((u) => [u.id, u]));
-      
-      for (const m of orgMemberships as MemberRow[]) {
-        const authUser = userMap.get(m.user_id);
-        const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
-        members.push({
-          id: m.id,
-          user_id: m.user_id,
-          role: m.role,
-          email: authUser?.email,
-          full_name: profile?.full_name ?? undefined,
-          created_at: m.created_at,
-        });
-      }
-    }
-
-    if (orgInvitations) {
-      invitations.push(...orgInvitations);
-    }
-  }
+  // Team members moved to TeamTabAsync
 
   // Recent security events for the current user
   let securityEvents: any[] = [];
@@ -205,11 +141,9 @@ export default async function SettingsPage({
               <h2 className="text-base font-bold text-slate-900">Courier Services</h2>
               <p className="text-sm text-slate-500">Credentials are encrypted with AES-256-GCM before storage and never returned to the browser.</p>
             </div>
-            <CourierSettings
-              shopId={shop.id}
-              configs={courierConfigs}
-              allCouriers={(allCouriers ?? []) as { id: string; provider: string; display_name: string }[]}
-            />
+            <Suspense fallback={<div className="py-8 text-center text-sm text-slate-500">Loading courier services...</div>}>
+              <CouriersTabAsync shopId={shop.id} />
+            </Suspense>
           </section>
         )}
 
@@ -220,11 +154,9 @@ export default async function SettingsPage({
               <h2 className="text-base font-bold text-slate-900">Dispatch Settings</h2>
               <p className="text-sm text-slate-500">Configure how and when orders are sent to couriers.</p>
             </div>
-            <DispatchSettings
-              shopId={shop.id}
-              initialAutomatic={Boolean(shop.automatic_courier)}
-              configs={courierConfigs as any}
-            />
+            <Suspense fallback={<div className="py-8 text-center text-sm text-slate-500">Loading dispatch settings...</div>}>
+              <DispatchTabAsync shopId={shop.id} automatic_courier={shop.automatic_courier} />
+            </Suspense>
           </section>
         )}
 
@@ -268,13 +200,9 @@ export default async function SettingsPage({
               <h2 className="text-base font-bold text-slate-900">Team</h2>
               <p className="text-sm text-slate-500">Manage who has access to your store workspace.</p>
             </div>
-            <TeamSettings
-              organizationId={shop.organization_id}
-              members={members}
-              invitations={invitations}
-              currentUserId={user.id}
-              currentUserRole={currentUserRole}
-            />
+            <Suspense fallback={<div className="py-8 text-center text-sm text-slate-500">Loading team settings...</div>}>
+              <TeamTabAsync shopId={shop.id} orgId={shop.organization_id} currentUserId={user.id} currentUserRole={currentUserRole} />
+            </Suspense>
           </section>
         )}
 
@@ -316,3 +244,88 @@ export default async function SettingsPage({
     </AppShell>
   );
 }
+
+// --- Async Tab Components ---
+
+async function CouriersTabAsync({ shopId }: { shopId: string }) {
+  const admin = createAdminClient();
+  const supabase = await createServerSupabaseClient();
+  const [courierConfigsRes, allCouriersRes] = await Promise.all([
+    supabase
+      .from("courier_configs")
+      .select('id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)')
+      .eq("shop_id", shopId)
+      .order("priority"),
+    getAllCouriers()
+  ]);
+
+  return (
+    <CourierSettings
+      shopId={shopId}
+      configs={(courierConfigsRes.data ?? []) as any}
+      allCouriers={(allCouriersRes ?? []) as any}
+    />
+  );
+}
+
+async function DispatchTabAsync({ shopId, automatic_courier }: { shopId: string, automatic_courier: any }) {
+  const supabase = await createServerSupabaseClient();
+  const { data: courierConfigs } = await supabase
+    .from("courier_configs")
+    .select('id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)')
+    .eq("shop_id", shopId)
+    .order("priority");
+
+  return (
+    <DispatchSettings
+      shopId={shopId}
+      initialAutomatic={Boolean(automatic_courier)}
+      configs={(courierConfigs ?? []) as any}
+    />
+  );
+}
+
+async function TeamTabAsync({ shopId, orgId, currentUserId, currentUserRole }: { shopId: string, orgId: string, currentUserId: string, currentUserRole: string }) {
+  const admin = createAdminClient();
+  const supabase = await createServerSupabaseClient();
+  
+  const members: Array<any> = [];
+  const invitations: Array<any> = [];
+
+  const [{ data: orgMemberships }, { data: orgInvitations }, { data: { users } }] = await Promise.all([
+    admin.from("memberships").select("id,user_id,role,created_at,profiles(full_name)").eq("organization_id", orgId),
+    supabase.from("organization_invitations").select("id, email, role, status, created_at, expires_at").eq("organization_id", orgId).neq("status", "accepted").order("created_at", { ascending: false }),
+    admin.auth.admin.listUsers({ perPage: 1000 })
+  ]);
+    
+  if (orgMemberships) {
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    for (const m of orgMemberships as any[]) {
+      const authUser = userMap.get(m.user_id);
+      const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+      members.push({
+        id: m.id,
+        user_id: m.user_id,
+        role: m.role,
+        email: authUser?.email,
+        full_name: profile?.full_name ?? undefined,
+        created_at: m.created_at,
+      });
+    }
+  }
+
+  if (orgInvitations) {
+    invitations.push(...orgInvitations);
+  }
+
+  return (
+    <TeamSettings
+      organizationId={orgId}
+      members={members}
+      invitations={invitations}
+      currentUserId={currentUserId}
+      currentUserRole={currentUserRole}
+    />
+  );
+}
+

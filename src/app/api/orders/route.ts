@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
       query = query
         .is("cancelled_at", null)
         .neq("fulfillment_status", "FULFILLED")
-        .neq("dispatch_status", "dispatched")
+        .in("dispatch_status", ["not_dispatched"]) // excludes "dispatched", "dispatching", "failed"
         .not("customer_phone", "is", null)
         .eq("is_skipped", false);
     } else if (filter === "unfulfilled") {
