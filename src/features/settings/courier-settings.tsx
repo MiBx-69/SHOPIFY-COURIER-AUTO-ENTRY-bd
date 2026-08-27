@@ -612,11 +612,10 @@ function EmptyCourierCard({
       const cleaned = Object.fromEntries(
         Object.entries(formValues).filter(([, v]) => v.trim() !== "")
       );
-      const res = await fetch("/api/couriers", {
-        method: "POST",
+      const res = await fetch(`/api/couriers?shopId=${shopId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shopId,
           courierId,
           enabled: true,
           priority: 1,
@@ -624,6 +623,12 @@ function EmptyCourierCard({
         })
       });
       if (res.ok) {
+        const json = await res.json();
+        if (json.data?.id) {
+          window.location.reload();
+        } else {
+          window.location.reload();
+        }
         window.location.reload();
       } else {
         const json = (await res.json()) as { error?: string };

@@ -50,7 +50,7 @@ export function apiError(error: unknown) {
   // Extract PostgREST / Postgres error fields if present
   const isPgError = error && typeof error === "object" && "code" in error && "message" in error;
   const pgError = isPgError ? (error as any) : null;
-  const errorMessage = pgError ? pgError.message : (error instanceof Error ? error.message : String(error));
+  const errorMessage = pgError ? pgError.message : (error instanceof Error ? error.message : (typeof error === "object" ? JSON.stringify(error) : String(error)));
 
   const logPayload = {
     level: "ERROR",
