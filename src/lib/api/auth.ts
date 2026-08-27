@@ -47,14 +47,22 @@ export function apiError(error: unknown) {
     return NextResponse.json({ success: false, error: "Invalid request data. Please check your input.", errorId }, { status: 400 });
   }
 
-  console.error(JSON.stringify({
+  // Extract PostgREST / Postgres error fields if present
+  const isPgError = error && typeof error === "object" && "code" in error && "message" in error;
+  const pgError = isPgError ? (error as any) : null;
+  const errorMessage = pgError ? pgError.message : (error instanceof Error ? error.message : String(error));
+
+  const logPayload = {
     level: "ERROR",
     errorId,
     timestamp: new Date().toISOString(),
     service: "api",
-    message: error instanceof Error ? error.message : String(error),
+    message: errorMessage,
+    ...(pgError ? { dbCode: pgError.code, details: pgError.details, hint: pgError.hint } : {}),
     stack: process.env.NODE_ENV !== "production" && error instanceof Error ? error.stack : undefined,
-  }));
+  };
+
+  console.error(JSON.stringify(logPayload));
 
   // Async Telegram alert — never blocks response
   import("@/lib/notifications/telegram")
@@ -62,11 +70,11 @@ export function apiError(error: unknown) {
       errorId,
       timestamp: new Date().toISOString(),
       severity: "ERROR",
-      category: "UNKNOWN_ERROR",
+      category: pgError ? "DATABASE_ERROR" : "UNKNOWN_ERROR",
       service: "api",
       safeMessage: "Something went wrong while processing your request.",
       httpStatus: 500,
-      internalMessage: error instanceof Error ? error.message : String(error),
+      internalMessage: errorMessage + (pgError ? ` (Code: ${pgError.code}, Hint: ${pgError.hint})` : ""),
     }))
     .catch(() => { /* Telegram failure must never crash */ });
 
