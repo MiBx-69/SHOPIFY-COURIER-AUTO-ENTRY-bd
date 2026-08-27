@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Loader2, Plus, Building, User, Mail, ShieldAlert } from "lucide-react";
+import { Loader2, Plus, Building, User, Mail, ShieldAlert, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface Organization {
@@ -165,7 +165,7 @@ export function DeveloperConsole() {
             </div>
 
             <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => setIsCreating(false)} disabled={busy} className="cursor-pointer">
+              <Button type="button" variant="ghost" onClick={() => setIsCreating(false)} disabled={busy} className="cursor-pointer">
                 Cancel
               </Button>
               <Button type="submit" disabled={busy} className="bg-slate-900 text-white hover:bg-slate-800 cursor-pointer">
