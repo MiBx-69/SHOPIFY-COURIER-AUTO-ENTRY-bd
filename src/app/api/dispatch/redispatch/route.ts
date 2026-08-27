@@ -31,8 +31,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Order is already dispatched." }, { status: 409 });
     }
 
-    if (!order.is_skipped && !["failed", "cancelled"].includes(order.dispatch_status)) {
-      return NextResponse.json({ success: false, error: "This order does not need redispatch." }, { status: 422 });
+    // V1 intentionally scopes one-click redispatch to failed/skipped work. A
+    // cancelled courier shipment can be added later with provider-specific
+    // cancellation/reuse handling.
+    if (!order.is_skipped && order.dispatch_status !== "failed") {
+      return NextResponse.json({ success: false, error: "Only skipped or failed orders can be redispatched." }, { status: 422 });
     }
 
     const { data: shop } = await admin
@@ -45,8 +48,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: "Redispatch is disabled in Dispatch Settings." }, { status: 403 });
     }
 
-    // Restore the queue state first. claim_dispatch then safely takes the row lock
-    // and transitions it to dispatching, preserving the existing dispatch record.
+    let courierConfigId = body.courierConfigId;
+    if (!courierConfigId && shop.automatic_courier) {
+      courierConfigId = await resolveCourierConfigId(
+        admin,
+        order.shop_id,
+        order.shipping_method,
+        order.shipping_method_code,
+        true
+      );
+    }
+
+    if (!courierConfigId) {
+      return NextResponse.json({ success: false, error: "No courier could be selected for redispatch. Enable Automatic Courier Selection or select a courier." }, { status: 400 });
+    }
+
+    // Clear the skip/failure queue state before claim_dispatch. The RPC then
+    // locks the order and transitions the existing dispatch record safely.
     const now = new Date().toISOString();
     const { error: restoreError } = await admin
       .from("orders")
@@ -67,21 +85,6 @@ export async function POST(request: NextRequest) {
       occurred_at: now
     });
     if (eventError) throw eventError;
-
-    let courierConfigId = body.courierConfigId;
-    if (!courierConfigId && shop.automatic_courier) {
-      courierConfigId = await resolveCourierConfigId(
-        admin,
-        order.shop_id,
-        order.shipping_method,
-        order.shipping_method_code,
-        true
-      );
-    }
-
-    if (!courierConfigId) {
-      return NextResponse.json({ success: false, error: "No courier could be selected for redispatch. Enable Automatic Courier Selection or select a courier." }, { status: 400 });
-    }
 
     const { data: dispatch, error: claimError } = await supabase.rpc("claim_dispatch", {
       p_order_id: order.id,
