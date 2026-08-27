@@ -686,12 +686,14 @@ export function OrderList({
     setShowSkipModal(false);
     setBatchProcessing(true);
     try {
-      await Promise.all(selected.map((orderId) => fetch("/api/orders/skip", {
+      const res = await fetch("/api/orders/skip", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, reason: skipReason || undefined })
-      })));
-      setNotice({ text: `${selected.length} orders removed from dispatch queue.`, type: "info" });
+        body: JSON.stringify({ orderIds: selected, reason: skipReason || undefined })
+      });
+      if (!res.ok) throw new Error("Failed to skip");
+      const json = await res.json();
+      setNotice({ text: json.message || `${selected.length} orders removed from dispatch queue.`, type: "info" });
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ["orders-list"] });
       queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
@@ -705,12 +707,14 @@ export function OrderList({
   async function executeBulkRestore() {
     setBatchProcessing(true);
     try {
-      await Promise.all(selected.map((orderId) => fetch("/api/orders/restore", {
+      const res = await fetch("/api/orders/restore", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId })
-      })));
-      setNotice({ text: `${selected.length} orders restored to dispatch queue.`, type: "success" });
+        body: JSON.stringify({ orderIds: selected })
+      });
+      if (!res.ok) throw new Error("Failed to restore");
+      const json = await res.json();
+      setNotice({ text: json.message || `${selected.length} orders restored to dispatch queue.`, type: "success" });
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ["orders-list"] });
       queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
@@ -725,12 +729,23 @@ export function OrderList({
     setShowCancelModal(false);
     setBatchProcessing(true);
     try {
-      await Promise.all(selected.map((orderId) => fetch("/api/dispatch/cancel", {
+      const res = await fetch("/api/dispatch/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId, reason: cancelReason || undefined })
-      })));
-      setNotice({ text: `${selected.length} courier dispatches cancelled.`, type: "info" });
+        body: JSON.stringify({ orderIds: selected, reason: cancelReason || undefined })
+      });
+      if (!res.ok) throw new Error("Failed to cancel");
+      const json = await res.json();
+      const cancelledCount = json.summary?.cancelled ?? selected.length;
+      
+      if (cancelledCount === 0 && selected.length > 0) {
+         setNotice({ text: `Failed to cancel dispatches (perhaps they were unsupported).`, type: "error" });
+      } else if (cancelledCount < selected.length) {
+         setNotice({ text: `${cancelledCount} of ${selected.length} courier dispatches cancelled.`, type: "error" });
+      } else {
+         setNotice({ text: `${cancelledCount} courier dispatches cancelled.`, type: "info" });
+      }
+      
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ["orders-list"] });
       queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
