@@ -69,6 +69,12 @@ export async function PATCH(
         iv: encrypted.iv,
         auth_tag: encrypted.authTag
       });
+
+      // Invalidate any persisted OAuth token so next request forces a fresh grant
+      if (provider === "pathao") {
+        const { PathaoProvider } = await import("@/services/courier/providers");
+        await new PathaoProvider().invalidateToken(id);
+      }
     }
 
     // Audit log

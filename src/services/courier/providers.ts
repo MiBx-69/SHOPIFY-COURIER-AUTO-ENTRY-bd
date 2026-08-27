@@ -235,34 +235,217 @@ export class PathaoProvider implements CourierProvider {
 
   private baseUrl(c: Record<string, string>) {
     const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
-    return isSandbox ? "https://api-hermes-sandbox.pathao.com" : "https://api-hermes.pathao.com";
+    // Sandbox URL per official Pathao docs: courier-api-sandbox.pathao.com
+    return isSandbox ? "https://courier-api-sandbox.pathao.com" : "https://api-hermes.pathao.com";
   }
 
-  private async token(c: Record<string, string>) {
-    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/issue-token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_id: c.clientId,
-        client_secret: c.clientSecret,
-        username: c.username,
-        password: c.password,
-        grant_type: "password"
-      })
-    });
-    const token = (data as { access_token?: string }).access_token;
-    if (!response.ok || !token) throw new Error("Pathao credentials were rejected");
-    return token;
+  /**
+   * Returns a valid Bearer access token for the given courier config.
+   *
+   * Strategy (fastest-first):
+   *   1. Redis cache (key: mibx:pathao:token:<courierConfigId>)
+   *   2. DB row in courier_oauth_tokens — if not expired, use it and warm Redis
+   *   3. Try refresh_token grant if a refresh token exists in DB
+   *   4. Full password grant as last resort; persist result to DB + Redis
+   *
+   * courierConfigId is optional — when not supplied (e.g. testConnection before
+   * the config is saved) we always do a fresh password grant and don't persist.
+   */
+  private async getToken(
+    c: Record<string, string>,
+    courierConfigId?: string
+  ): Promise<string> {
+    // ── 1. Redis hot cache ───────────────────────────────────────────────────
+    if (courierConfigId) {
+      const { redis } = await import("@/lib/redis");
+      if (redis) {
+        const cached = await redis.get<string>(`mibx:pathao:token:${courierConfigId}`);
+        if (cached) return cached;
+      }
+    }
+
+    // ── 2. DB token row ──────────────────────────────────────────────────────
+    if (courierConfigId) {
+      const { createAdminClient } = await import("@/lib/supabase/admin");
+      const admin = createAdminClient();
+      const { data: row } = await admin
+        .from("courier_oauth_tokens")
+        .select("access_token, refresh_token, expires_at, shop_id")
+        .eq("courier_config_id", courierConfigId)
+        .maybeSingle();
+
+      if (row) {
+        const expiresAt = new Date(row.expires_at).getTime();
+        const nowMs = Date.now();
+        const bufferMs = 5 * 60 * 1000; // refresh 5 mins before expiry
+
+        if (expiresAt - nowMs > bufferMs) {
+          // Token still valid — warm Redis and return
+          await this.warmRedisCache(courierConfigId, row.access_token, expiresAt);
+          return row.access_token;
+        }
+
+        // Token expired — try refresh grant if we have a refresh_token
+        if (row.refresh_token) {
+          try {
+            const refreshed = await this.issueTokenFromRefresh(c, row.refresh_token);
+            await this.persistToken(courierConfigId, row.shop_id, refreshed);
+            return refreshed.access_token;
+          } catch {
+            // refresh failed — fall through to password grant
+          }
+        }
+      }
+    }
+
+    // ── 3. Full password grant ───────────────────────────────────────────────
+    const issued = await this.issueTokenFromPassword(c);
+
+    if (courierConfigId) {
+      // Need shop_id to persist — look it up from courier_configs
+      const { createAdminClient } = await import("@/lib/supabase/admin");
+      const admin = createAdminClient();
+      const { data: config } = await admin
+        .from("courier_configs")
+        .select("shop_id")
+        .eq("id", courierConfigId)
+        .single();
+
+      if (config?.shop_id) {
+        await this.persistToken(courierConfigId, config.shop_id, issued);
+      }
+    }
+
+    return issued.access_token;
+  }
+
+  /** POST /aladdin/api/v1/issue-token with grant_type=password */
+  private async issueTokenFromPassword(c: Record<string, string>): Promise<{
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  }> {
+    const { response, data } = await courierFetch(
+      `${this.baseUrl(c)}/aladdin/api/v1/issue-token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: c.clientId,
+          client_secret: c.clientSecret,
+          username: c.username,
+          password: c.password,
+          grant_type: "password"
+        })
+      }
+    );
+    const d = data as { access_token?: string; refresh_token?: string; expires_in?: number };
+    if (!response.ok || !d.access_token) {
+      throw new Error("Pathao credentials were rejected");
+    }
+    return { access_token: d.access_token, refresh_token: d.refresh_token, expires_in: d.expires_in ?? 432000 };
+  }
+
+  /** POST /aladdin/api/v1/issue-token with grant_type=refresh_token */
+  private async issueTokenFromRefresh(
+    c: Record<string, string>,
+    refreshToken: string
+  ): Promise<{ access_token: string; refresh_token?: string; expires_in: number }> {
+    const { response, data } = await courierFetch(
+      `${this.baseUrl(c)}/aladdin/api/v1/issue-token`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: c.clientId,
+          client_secret: c.clientSecret,
+          grant_type: "refresh_token",
+          refresh_token: refreshToken
+        })
+      }
+    );
+    const d = data as { access_token?: string; refresh_token?: string; expires_in?: number };
+    if (!response.ok || !d.access_token) {
+      throw new Error("Pathao refresh token was rejected");
+    }
+    return { access_token: d.access_token, refresh_token: d.refresh_token, expires_in: d.expires_in ?? 432000 };
+  }
+
+  /** Upsert token to DB and warm Redis cache */
+  private async persistToken(
+    courierConfigId: string,
+    shopId: string,
+    token: { access_token: string; refresh_token?: string; expires_in: number }
+  ): Promise<void> {
+    const expiresAt = new Date(Date.now() + token.expires_in * 1000).toISOString();
+
+    try {
+      const { createAdminClient } = await import("@/lib/supabase/admin");
+      const admin = createAdminClient();
+      await admin.from("courier_oauth_tokens").upsert(
+        {
+          courier_config_id: courierConfigId,
+          shop_id: shopId,
+          access_token: token.access_token,
+          refresh_token: token.refresh_token ?? null,
+          expires_at: expiresAt,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: "courier_config_id" }
+      );
+    } catch (err) {
+      // DB persist failure should not block the request
+      console.warn("[Pathao] Failed to persist OAuth token to DB:", err);
+    }
+
+    await this.warmRedisCache(
+      courierConfigId,
+      token.access_token,
+      new Date(expiresAt).getTime()
+    );
+  }
+
+  /** Store access token in Redis with a TTL 5 min shorter than actual expiry */
+  private async warmRedisCache(
+    courierConfigId: string,
+    accessToken: string,
+    expiresAtMs: number
+  ): Promise<void> {
+    try {
+      const { redis } = await import("@/lib/redis");
+      if (!redis) return;
+      const ttlSeconds = Math.max(60, Math.floor((expiresAtMs - Date.now()) / 1000) - 300);
+      await redis.setex(`mibx:pathao:token:${courierConfigId}`, ttlSeconds, accessToken);
+    } catch {
+      // Redis failure is non-fatal
+    }
+  }
+
+  /** Invalidate stored token (e.g. on credential replacement) */
+  async invalidateToken(courierConfigId: string): Promise<void> {
+    try {
+      const { redis } = await import("@/lib/redis");
+      if (redis) await redis.del(`mibx:pathao:token:${courierConfigId}`);
+
+      const { createAdminClient } = await import("@/lib/supabase/admin");
+      await createAdminClient()
+        .from("courier_oauth_tokens")
+        .delete()
+        .eq("courier_config_id", courierConfigId);
+    } catch {
+      // Non-fatal
+    }
   }
 
   async testConnection(c: Record<string, string>) {
     this.validateConfig(c);
-    await this.token(c);
+    // Always do a fresh password grant on test — do NOT use cached token
+    await this.issueTokenFromPassword(c);
   }
 
-  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+  async getPickupLocations(c: CourierCredentials, courierConfigId?: string): Promise<PickupLocation[]> {
     this.validateConfig(c);
-    const token = await this.token(c);
+    const token = await this.getToken(c, courierConfigId);
     const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/stores`, {
       headers: { Authorization: `Bearer ${token}` }
     });
@@ -283,6 +466,7 @@ export class PathaoProvider implements CourierProvider {
       }));
     }
 
+    // Fallback: manual storeId from credentials
     if (c.storeId) {
       return [
         {
@@ -299,14 +483,13 @@ export class PathaoProvider implements CourierProvider {
     return [];
   }
 
-  async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
+  async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string, courierConfigId?: string): Promise<CourierResult> {
     try {
       this.validateConfig(c);
-      const token = await this.token(c);
+      const token = await this.getToken(c, courierConfigId);
 
       // Resolve store_id
       const chosenStoreId = Number(p.pickupLocationId);
-
       if (isNaN(chosenStoreId) || chosenStoreId <= 0) {
         return {
           outcome: "known_failure",
@@ -330,13 +513,14 @@ export class PathaoProvider implements CourierProvider {
       const itemQty = Math.max(1, (p.items || []).reduce((n, item) => n + (item.quantity || 1), 0));
       const weight = Math.max(0.5, Math.min(10.0, Number(c.defaultWeightKg || 0.5) || 0.5));
       const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
-      const itemDesc = (p.items || []).map((i) => `${i.productName || "Item"}${i.variant ? ` (${i.variant})` : ""}`).join(", ").slice(0, 150) || "General Goods";
+      const itemDesc = (p.items || [])
+        .map((i) => `${i.productName || "Item"}${i.variant ? ` (${i.variant})` : ""}`)
+        .join(", ")
+        .slice(0, 150) || "General Goods";
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         store_id: chosenStoreId,
         merchant_order_id: String(p.orderNumber || p.orderId).replace(/[^a-zA-Z0-9_-]/g, "") || String(p.orderId),
-        sender_name: "Merchant",
-        sender_phone: "01700000000",
         recipient_name: p.customerName || "Customer",
         recipient_phone: phone,
         recipient_address: address,
@@ -360,40 +544,50 @@ export class PathaoProvider implements CourierProvider {
         return { outcome: "success", trackingId: tracking, courierReference: d.data?.order_id, metadata: { status: response.status } };
       }
 
+      // 401 Unauthorized — cached token may be stale; invalidate and let next dispatch retry
+      if (response.status === 401 && courierConfigId) {
+        await this.invalidateToken(courierConfigId);
+      }
+
       const errorMsg = extractCourierErrorMessage(data, d.message || "Pathao did not accept this shipment");
-      return { 
-        outcome: response.status >= 500 ? "unknown" : "known_failure", 
-        message: errorMsg, 
-        metadata: { status: response.status, data: d } 
+      return {
+        outcome: response.status >= 500 ? "unknown" : "known_failure",
+        message: errorMsg,
+        metadata: { status: response.status, data: d }
       };
     } catch (e) {
       return unknown(e);
     }
   }
 
-  async getTracking(trackingId: string, c: Record<string, string>) {
-    const token = await this.token(c);
-    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/info`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+  async getTracking(trackingId: string, c: Record<string, string>, courierConfigId?: string) {
+    const token = await this.getToken(c, courierConfigId);
+    const { response, data } = await courierFetch(
+      `${this.baseUrl(c)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/info`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
     if (!response.ok) throw new Error("Unable to fetch Pathao tracking");
     const d = data as { data?: { order_status?: string; updated_at?: string } };
     return { status: d.data?.order_status || "unknown", occurredAt: d.data?.updated_at };
   }
 
-  async cancelShipment(trackingId: string, c: Record<string, string>): Promise<void> {
+  async cancelShipment(trackingId: string, c: Record<string, string>, courierConfigId?: string): Promise<void> {
     this.validateConfig(c);
-    const token = await this.token(c);
-    const { response, data } = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/cancel`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-    });
+    const token = await this.getToken(c, courierConfigId);
+    const { response, data } = await courierFetch(
+      `${this.baseUrl(c)}/aladdin/api/v1/orders/${encodeURIComponent(trackingId)}/cancel`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+      }
+    );
     if (!response.ok) {
       const d = data as { message?: string };
       throw new Error(d?.message || "Pathao rejected cancellation for this shipment");
     }
   }
 }
+
 
 export class SteadfastProvider implements CourierProvider {
   readonly name = "steadfast" as const;
