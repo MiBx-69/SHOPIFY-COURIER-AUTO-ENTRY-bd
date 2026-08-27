@@ -2,9 +2,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraphql } from "@/services/shopify/client";
 import { redis } from "@/lib/redis";
 
-type ShopifyOrder = { id: string; legacyResourceId: string; name: string; email: string | null; phone: string | null; displayFinancialStatus: string; displayFulfillmentStatus: string; cancelledAt: string | null; closedAt: string | null; createdAt: string; updatedAt: string; note: string | null; currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; currentTotalDiscountsSet: { shopMoney: { amount: string } }; currentShippingPriceSet: { shopMoney: { amount: string } }; currentTotalTaxSet: { shopMoney: { amount: string } }; currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; shippingAddress: Record<string,string> | null; billingAddress: Record<string,string> | null; lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; originalTotalSet: { shopMoney: { amount: string } }; product: { id: string } | null; variant: { id: string } | null }> } };
+type ShopifyShippingLine = {
+  id: string;
+  title: string;
+  code: string | null;
+  isRemoved: boolean;
+};
+
+type ShopifyOrder = { id: string; legacyResourceId: string; name: string; email: string | null; phone: string | null; displayFinancialStatus: string; displayFulfillmentStatus: string; cancelledAt: string | null; closedAt: string | null; createdAt: string; updatedAt: string; note: string | null; currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; currentTotalDiscountsSet: { shopMoney: { amount: string } }; currentShippingPriceSet: { shopMoney: { amount: string } }; currentTotalTaxSet: { shopMoney: { amount: string } }; currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; shippingAddress: Record<string,string> | null; billingAddress: Record<string,string> | null; shippingLines: { nodes: ShopifyShippingLine[] }; lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; originalTotalSet: { shopMoney: { amount: string } }; product: { id: string } | null; variant: { id: string } | null }> } };
 const minor = (amount: string) => Math.round(Number(amount) * 100);
-const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } }`;
+const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } shippingLines(first:10, includeRemovals:true) { nodes { id title code isRemoved } } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } }`;
 
 type OrderPage = {
   orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
@@ -61,6 +68,7 @@ export class ShopifySyncService {
 
   private async upsertOrder(shopId: string, source: ShopifyOrder) {
     const admin = createAdminClient();
+    const selectedShippingLine = source.shippingLines?.nodes?.find((line) => !line.isRemoved) || source.shippingLines?.nodes?.[0] || null;
     const row = {
       shop_id: shopId,
       shopify_order_id: source.legacyResourceId,
@@ -72,6 +80,8 @@ export class ShopifySyncService {
       customer_phone: source.shippingAddress?.phone || source.billingAddress?.phone || source.phone,
       shipping_address: source.shippingAddress || {},
       billing_address: source.billingAddress || {},
+      shipping_method: selectedShippingLine?.title || null,
+      shipping_method_code: selectedShippingLine?.code || null,
       note: source.note,
       subtotal_minor: minor(source.currentSubtotalPriceSet.shopMoney.amount),
       discount_minor: minor(source.currentTotalDiscountsSet.shopMoney.amount),
