@@ -8,7 +8,7 @@ export interface CourierProvider {
   testConnection(credentials: CourierCredentials): Promise<void>;
   createShipment(payload: NormalizedShipment, credentials: CourierCredentials, idempotencyKey: string): Promise<CourierResult>;
   getTracking(trackingId: string, credentials: CourierCredentials): Promise<{ status: string; message?: string; occurredAt?: string }>;
-  getPickupLocations(credentials: CourierCredentials): Promise<PickupLocation[]>;
+  getPickupLocations(credentials: CourierCredentials, courierConfigId?: string): Promise<PickupLocation[]>;
   cancelShipment?(trackingId: string, credentials: CourierCredentials): Promise<void>;
   getCapabilities(): import("@/types/domain").CourierCapabilities;
 }

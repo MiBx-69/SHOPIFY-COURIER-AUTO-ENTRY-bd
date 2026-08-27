@@ -50,7 +50,7 @@ export class PickupLocationService {
       
       let locations: PickupLocation[] = [];
       if (capabilities.supportsPickupLocationSync) {
-        locations = await provider.getPickupLocations(credentials);
+        locations = await provider.getPickupLocations(credentials, courierConfigId);
       }
 
       // Upsert locations to the new normalized table

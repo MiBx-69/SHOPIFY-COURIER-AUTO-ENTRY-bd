@@ -450,6 +450,30 @@ export class PathaoProvider implements CourierProvider {
       headers: { Authorization: `Bearer ${token}` }
     });
 
+    // If token was stale, invalidate and retry once with a fresh token
+    if (response.status === 401 && courierConfigId) {
+      await this.invalidateToken(courierConfigId);
+      const freshToken = await this.getToken(c, courierConfigId);
+      const retry = await courierFetch(`${this.baseUrl(c)}/aladdin/api/v1/stores`, {
+        headers: { Authorization: `Bearer ${freshToken}` }
+      });
+      if (!retry.response.ok) {
+        throw new Error(`Pathao stores API error after token refresh: ${retry.response.status}`);
+      }
+      const rd = retry.data as { data?: { data?: Array<Record<string, unknown>> } | Array<Record<string, unknown>> };
+      const retryList = Array.isArray(rd?.data) ? rd.data : Array.isArray(rd?.data?.data) ? rd.data.data : [];
+      return retryList.map((s) => ({
+        id: String(s.store_id || s.id),
+        courierLocationId: String(s.store_id || s.id),
+        name: String(s.store_name || s.name || "Pathao Store"),
+        address: String(s.store_address || s.address || ""),
+        phone: s.store_phone ? String(s.store_phone) : undefined,
+        city: s.city_name ? String(s.city_name) : undefined,
+        area: s.zone_name ? String(s.zone_name) : undefined,
+        isActive: Boolean(s.is_active ?? true)
+      }));
+    }
+
     const d = data as { data?: { data?: Array<Record<string, unknown>> } | Array<Record<string, unknown>> };
     const rawList = Array.isArray(d?.data) ? d.data : Array.isArray(d?.data?.data) ? d.data.data : [];
 
@@ -464,6 +488,12 @@ export class PathaoProvider implements CourierProvider {
         area: s.zone_name ? String(s.zone_name) : undefined,
         isActive: Boolean(s.is_active ?? true)
       }));
+    }
+
+    if (!response.ok) {
+      // Surface the error so the sync route returns a useful message instead of 0 locations
+      const errMsg = (data as { message?: string })?.message ?? `HTTP ${response.status}`;
+      throw new Error(`Pathao stores API error: ${errMsg}`);
     }
 
     // Fallback: manual storeId from credentials
