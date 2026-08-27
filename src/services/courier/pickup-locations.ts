@@ -74,6 +74,29 @@ export class PickupLocationService {
         });
       }
 
+      // Re-fetch from DB so returned locations carry their Supabase UUIDs,
+      // not the courier's own integer IDs. This is critical: the UI sends
+      // the location's `id` to POST /pickup-locations/default, which validates
+      // it against the DB UUID — if we return courier IDs here the set-default
+      // call will always 500 with "location does not exist".
+      const { data: dbLocs } = await admin
+        .from("courier_pickup_locations")
+        .select("id, courier_location_id, name, address, phone, area, city, is_active")
+        .eq("shop_id", shopId)
+        .eq("courier_config_id", courierConfigId)
+        .order("name", { ascending: true });
+
+      const persistedLocations: PickupLocation[] = (dbLocs || []).map((d) => ({
+        id: d.id,                              // ← DB UUID (used by setDefault)
+        courierLocationId: d.courier_location_id,
+        name: d.name,
+        address: d.address || undefined,
+        phone: d.phone || undefined,
+        area: d.area || undefined,
+        city: d.city || undefined,
+        isActive: d.is_active
+      }));
+
       // Fetch the explicit preference
       const { data: pref } = await admin
         .from("courier_pickup_preferences")
@@ -90,7 +113,7 @@ export class PickupLocationService {
         await redis.del(cacheKey);
       }
 
-      return { locations, defaultLocationId };
+      return { locations: persistedLocations, defaultLocationId };
     } finally {
       if (redis) await redis.del(lockKey);
     }
