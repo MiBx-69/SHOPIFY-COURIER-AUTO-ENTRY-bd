@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_shop_time
 
 -- ─── Webhook Events ────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_webhook_events_shop_status
-  ON webhook_events (shop_id, status, created_at DESC);
+  ON webhook_events (shop_id, status, received_at DESC);
 
 -- ─── Security Events ──────────────────────────────────────────────────────
 -- Covers the security events query in settings/security page
