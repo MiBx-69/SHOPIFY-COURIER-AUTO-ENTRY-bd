@@ -12,7 +12,6 @@ interface BadgeConfig {
   dot: string;
 }
 
-// ─── 1. FULFILLMENT & ORDER STATUS ───────────────────────────────────────────
 const fulfillmentConfigs: Record<string, BadgeConfig> = {
   CANCELLED: { label: "Cancelled", className: "bg-red-50 text-red-700 border-red-200/80", dot: "bg-red-500" },
   FULFILLED: { label: "Fulfilled", className: "bg-emerald-50 text-emerald-700 border-emerald-200/80", dot: "bg-emerald-500" },
@@ -33,14 +32,9 @@ export function FulfillmentBadge({ status, size = "md", className, short = false
   const normalized = (status || "UNFULFILLED").toUpperCase().replace(/\s+/g, "_");
   const cfg = fulfillmentConfigs[normalized] || fulfillmentConfigs.UNFULFILLED;
   const label = short && normalized === "PARTIALLY_FULFILLED" ? "Partial" : cfg.label;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors", size === "sm" ? "px-2 py-0.5 text-[10px] leading-tight" : "px-2.5 py-0.5 text-[11px] leading-normal", cfg.className, className)}>
-      <span className={cn("rounded-full shrink-0 size-1.5", cfg.dot)} />{label}
-    </span>
-  );
+  return <span className={cn("inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors", size === "sm" ? "px-2 py-0.5 text-[10px] leading-tight" : "px-2.5 py-0.5 text-[11px] leading-normal", cfg.className, className)}><span className={cn("rounded-full shrink-0 size-1.5", cfg.dot)} />{label}</span>;
 }
 
-// ─── 2. PAYMENT STATUS ───────────────────────────────────────────────────────
 const paymentConfigs: Record<string, BadgeConfig> = {
   PAID: { label: "Paid", className: "bg-emerald-50 text-emerald-700 border-emerald-200/80", dot: "bg-emerald-500" },
   PENDING: { label: "COD / Pending", className: "bg-amber-50 text-amber-800 border-amber-200/80", dot: "bg-amber-500" },
@@ -57,14 +51,9 @@ export function PaymentBadge({ status, size = "md", className, short = false }: 
   const normalized = (status || "PENDING").toUpperCase().replace(/\s+/g, "_");
   const cfg = paymentConfigs[normalized] || paymentConfigs.PENDING;
   const label = short && (normalized === "PENDING" || normalized === "COD") ? "COD" : cfg.label;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors", size === "sm" ? "px-2 py-0.5 text-[10px] leading-tight" : "px-2.5 py-0.5 text-[11px] leading-normal", cfg.className, className)}>
-      <span className={cn("rounded-full shrink-0 size-1.5", cfg.dot)} />{label}
-    </span>
-  );
+  return <span className={cn("inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors", size === "sm" ? "px-2 py-0.5 text-[10px] leading-tight" : "px-2.5 py-0.5 text-[11px] leading-normal", cfg.className, className)}><span className={cn("rounded-full shrink-0 size-1.5", cfg.dot)} />{label}</span>;
 }
 
-// ─── 3. DISPATCH & COURIER STATUS ────────────────────────────────────────────
 const dispatchConfigs: Record<string, BadgeConfig> = {
   NOT_DISPATCHED: { label: "Pending", className: "bg-slate-100 text-slate-600 border-slate-200/80", dot: "bg-slate-400" },
   PENDING: { label: "Pending", className: "bg-slate-100 text-slate-600 border-slate-200/80", dot: "bg-slate-400" },
@@ -83,9 +72,13 @@ function getCurrentOrderId(element: HTMLElement, explicitOrderId?: string) {
   if (explicitOrderId) return explicitOrderId;
   const pathMatch = window.location.pathname.match(/\/orders\/([^/?#]+)/);
   if (pathMatch?.[1]) return pathMatch[1];
-  const row = element.closest("tr, [data-order-row]");
-  const href = row?.querySelector<HTMLAnchorElement>('a[href^="/orders/"]')?.getAttribute("href");
-  return href?.split("/")[2] || null;
+
+  let current: HTMLElement | null = element;
+  for (let depth = 0; current && depth < 8; depth += 1, current = current.parentElement) {
+    const href = current.querySelector<HTMLAnchorElement>('a[href^="/orders/"]')?.getAttribute("href");
+    if (href) return href.split("/")[2] || null;
+  }
+  return null;
 }
 
 async function redispatchFromBadge(element: HTMLElement, explicitOrderId?: string) {
@@ -94,7 +87,6 @@ async function redispatchFromBadge(element: HTMLElement, explicitOrderId?: strin
     window.alert("Could not determine the order to redispatch.");
     return;
   }
-
   try {
     const response = await fetch("/api/dispatch/redispatch", {
       method: "POST",
@@ -109,57 +101,20 @@ async function redispatchFromBadge(element: HTMLElement, explicitOrderId?: strin
   }
 }
 
-export function DispatchBadge({
-  status,
-  tracking,
-  size = "md",
-  copied = false,
-  onCopy,
-  className,
-  orderId
-}: {
-  status: string | null | undefined;
-  tracking?: string | null;
-  size?: BadgeSize;
-  copied?: boolean;
-  onCopy?: (tracking: string) => void;
-  className?: string;
-  orderId?: string;
-}) {
+export function DispatchBadge({ status, tracking, size = "md", copied = false, onCopy, className, orderId }: { status: string | null | undefined; tracking?: string | null; size?: BadgeSize; copied?: boolean; onCopy?: (tracking: string) => void; className?: string; orderId?: string }) {
   const normalized = (status || "PENDING").toUpperCase().replace(/\s+/g, "_");
   const cfg = dispatchConfigs[normalized] || dispatchConfigs.PENDING;
   const canRedispatch = normalized === "FAILED" || normalized === "SKIPPED";
   return (
     <div className={cn("inline-flex items-center gap-1.5", className)}>
-      <span className={cn("inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors", size === "sm" ? "px-2 py-0.5 text-[10px] leading-tight" : "px-2.5 py-0.5 text-[11px] leading-normal", cfg.className)}>
-        <span className={cn("rounded-full shrink-0 size-1.5", cfg.dot)} />{cfg.label}
-      </span>
-
-      {tracking && onCopy && (
-        <button onClick={(e) => { e.stopPropagation(); onCopy(tracking); }} title="Copy tracking ID" className="group inline-flex items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 text-[10px] font-mono text-slate-600 hover:text-slate-900 transition-colors border border-slate-200/70">
-          <span>{tracking}</span>
-          {copied ? <Check size={10} className="text-emerald-600 shrink-0" /> : <Copy size={10} className="opacity-40 group-hover:opacity-100 shrink-0" />}
-        </button>
-      )}
-
-      {canRedispatch && (
-        <button
-          type="button"
-          onClick={(e) => { e.preventDefault(); e.stopPropagation(); void redispatchFromBadge(e.currentTarget, orderId); }}
-          title="Redispatch this order"
-          className={cn("inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900", size === "sm" ? "text-[9px]" : "text-[10px]")}
-        >
-          <RotateCcw size={size === "sm" ? 9 : 10} />
-          Redispatch
-        </button>
-      )}
+      <span className={cn("inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors", size === "sm" ? "px-2 py-0.5 text-[10px] leading-tight" : "px-2.5 py-0.5 text-[11px] leading-normal", cfg.className)}><span className={cn("rounded-full shrink-0 size-1.5", cfg.dot)} />{cfg.label}</span>
+      {tracking && onCopy && <button onClick={(e) => { e.stopPropagation(); onCopy(tracking); }} title="Copy tracking ID" className="group inline-flex items-center gap-1 rounded bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 text-[10px] font-mono text-slate-600 hover:text-slate-900 transition-colors border border-slate-200/70"><span>{tracking}</span>{copied ? <Check size={10} className="text-emerald-600 shrink-0" /> : <Copy size={10} className="opacity-40 group-hover:opacity-100 shrink-0" />}</button>}
+      {canRedispatch && <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); void redispatchFromBadge(e.currentTarget, orderId); }} title="Redispatch this order" className={cn("inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 font-semibold text-slate-700 shadow-2xs hover:bg-slate-50 hover:text-slate-900", size === "sm" ? "text-[9px]" : "text-[10px]")}><RotateCcw size={size === "sm" ? 9 : 10} />Redispatch</button>}
     </div>
   );
 }
 
-// ─── 4. GENERAL INTEGRATION STATUS BADGE (Shopify / Courier Configs) ─────────
 export type IntegrationStatus = "connected" | "not_configured" | "failed" | "auth_error" | "network_error" | "provider_error" | "disabled" | string;
-
 const integrationConfigs: Record<string, BadgeConfig> = {
   connected: { label: "Connected", className: "bg-emerald-50 text-emerald-700 border-emerald-200/80", dot: "bg-emerald-500" },
   healthy: { label: "Connected", className: "bg-emerald-50 text-emerald-700 border-emerald-200/80", dot: "bg-emerald-500" },
@@ -173,9 +128,5 @@ const integrationConfigs: Record<string, BadgeConfig> = {
 
 export function StatusBadge({ status, className }: { status: IntegrationStatus; className?: string }) {
   const cfg = integrationConfigs[status] ?? integrationConfigs.not_configured;
-  return (
-    <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold", cfg.className, className)}>
-      <span className={cn("size-1.5 rounded-full shrink-0", cfg.dot)} />{cfg.label}
-    </span>
-  );
+  return <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold", cfg.className, className)}><span className={cn("size-1.5 rounded-full shrink-0", cfg.dot)} />{cfg.label}</span>;
 }
