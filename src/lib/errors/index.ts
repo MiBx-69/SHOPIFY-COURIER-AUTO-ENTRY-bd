@@ -149,7 +149,7 @@ export function classifyError(error: unknown): {
 
 // ─── Structured Logger ────────────────────────────────────────────────────────
 export function logStructured(structured: StructuredError): void {
-  const { severity, internalMessage: _internal, ...safe } = structured;
+  const { severity, internalMessage, ...safe } = structured;
 
   // Redact any secrets that might have slipped through
   const sanitized = {
@@ -159,6 +159,7 @@ export function logStructured(structured: StructuredError): void {
     apiKey: undefined,
     password: undefined,
     secret: undefined,
+    internalMessage,
   };
 
   const logEntry = JSON.stringify({ ...sanitized, severity, level: severity });
