@@ -9,7 +9,7 @@ CREATE INDEX IF NOT EXISTS idx_orders_shop_skipped
 
 -- Rebuild the materialized skip flag from the latest skip/restore event.
 UPDATE public.orders o
-SET is_skipped = (
+SET is_skipped = COALESCE((
   SELECT e.event_type = 'dispatch_skipped'
   FROM public.order_events e
   WHERE e.order_id = o.id
@@ -17,7 +17,7 @@ SET is_skipped = (
     AND e.event_type IN ('dispatch_skipped', 'dispatch_restored')
   ORDER BY e.occurred_at DESC, e.id DESC
   LIMIT 1
-);
+), false);
 
 CREATE OR REPLACE FUNCTION public.get_order_counts(p_shop_id uuid)
 RETURNS TABLE (
@@ -128,8 +128,6 @@ BEGIN
       RAISE EXCEPTION 'Dispatch is already in progress for this order.' USING ERRCODE = '55P03';
     END IF;
 
-    -- dispatches has a unique(order_id), so a cancelled dispatch must be
-    -- recycled rather than inserting a second row.
     UPDATE public.dispatches
     SET idempotency_key = p_idempotency_key,
         status = 'dispatching',
