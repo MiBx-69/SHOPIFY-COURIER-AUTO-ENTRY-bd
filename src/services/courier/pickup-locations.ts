@@ -202,15 +202,33 @@ export class PickupLocationService {
   static async setDefault(courierConfigId: string, shopId: string, userId: string, locationId: string): Promise<void> {
     const admin = createAdminClient();
     
-    // Validate that the location exists in the db for this shop and config
-    const { data: loc } = await admin
+    // Accept either DB UUID (id) or courier's own location ID (courier_location_id).
+    // Try UUID match first; if not found, fall back to courier_location_id match.
+    // This makes the API robust regardless of which ID the UI happens to send.
+    let loc: { id: string; name: string } | null = null;
+
+    // Attempt 1: match by DB UUID
+    const { data: byUuid } = await admin
       .from("courier_pickup_locations")
       .select("id, name")
       .eq("shop_id", shopId)
       .eq("courier_config_id", courierConfigId)
       .eq("id", locationId)
       .maybeSingle();
-      
+    loc = byUuid ?? null;
+
+    // Attempt 2: match by courier_location_id (e.g. Pathao integer store_id)
+    if (!loc) {
+      const { data: byCourierId } = await admin
+        .from("courier_pickup_locations")
+        .select("id, name")
+        .eq("shop_id", shopId)
+        .eq("courier_config_id", courierConfigId)
+        .eq("courier_location_id", locationId)
+        .maybeSingle();
+      loc = byCourierId ?? null;
+    }
+
     if (!loc) {
       throw new Error("Selected pickup location does not exist for this courier configuration.");
     }
