@@ -24,18 +24,22 @@ export async function POST(request: NextRequest) {
 
     const { data: shop } = await admin
       .from("shops")
-      .select("automatic_courier")
+      .select("automatic_courier,shipping_method_routing_enabled")
       .eq("id", order.shop_id)
       .single();
 
+    const routingEnabled = Boolean(shop?.automatic_courier && shop?.shipping_method_routing_enabled);
     let courierConfigId = body.courierConfigId;
-    if (!courierConfigId && shop?.automatic_courier) {
+
+    if (shop?.automatic_courier) {
       courierConfigId = await resolveCourierConfigId(
         admin,
         order.shop_id,
         order.shipping_method,
         order.shipping_method_code,
-        true
+        true,
+        body.courierConfigId,
+        routingEnabled
       );
     }
 
@@ -99,7 +103,8 @@ export async function POST(request: NextRequest) {
             courier_name: result.courierName,
             shipping_method: order.shipping_method,
             shipping_method_code: order.shipping_method_code,
-            courier_config_id: courierConfigId
+            courier_config_id: courierConfigId,
+            routing_enabled: routingEnabled
           }
         });
       }
