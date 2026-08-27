@@ -1,7 +1,19 @@
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+const getAllCouriers = unstable_cache(
+  async () => {
+    // using admin client avoids next/headers cookies() issues inside unstable_cache
+    const admin = createAdminClient();
+    const { data } = await admin.from("couriers").select("id,provider,display_name").order("display_name");
+    return data ?? [];
+  },
+  ["all-couriers"],
+  { revalidate: 300 }
+);
 import { ShopifyCard } from "@/features/settings/shopify-card";
 import { ShopifyConnect } from "@/features/settings/shopify-connect";
 import { CourierSettings, type CourierConfig } from "@/features/settings/courier-settings";
@@ -56,27 +68,27 @@ export default async function SettingsPage({
     last_error_message: string | null;
   } | null = null;
 
-  if (shop) {
-    const { data } = await admin
-      .from("shopify_installations")
-      .select("scopes,api_version,last_tested_at,last_test_status,last_error_message")
-      .eq("shop_id", shop.id)
-      .maybeSingle();
-    installation = data;
-  }
-
   let ordersCount = 0;
   let webhooksCount = 0;
-  if (shop) {
-    const { count: oCount } = await admin.from("orders").select("id", { count: "exact", head: true }).eq("shop_id", shop.id);
-    const { count: wCount } = await admin.from("webhook_events").select("id", { count: "exact", head: true }).eq("shop_id", shop.id);
+
+  if (activeTab === "shopify" && shop) {
+    const [{ data: inst }, { count: oCount }, { count: wCount }] = await Promise.all([
+      admin
+        .from("shopify_installations")
+        .select("scopes,api_version,last_tested_at,last_test_status,last_error_message")
+        .eq("shop_id", shop.id)
+        .maybeSingle(),
+      admin.from("orders").select("id", { count: "exact", head: true }).eq("shop_id", shop.id),
+      admin.from("webhook_events").select("id", { count: "exact", head: true }).eq("shop_id", shop.id)
+    ]);
+    installation = inst;
     ordersCount = oCount || 0;
     webhooksCount = wCount || 0;
   }
 
   // Courier configs
   const courierConfigs: CourierConfig[] = [];
-  if (shop) {
+  if ((activeTab === "couriers" || activeTab === "dispatch") && shop) {
     const { data: configs } = await supabase
       .from("courier_configs")
       .select(`id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)`)
@@ -85,10 +97,10 @@ export default async function SettingsPage({
     courierConfigs.push(...((configs ?? []) as unknown as CourierConfig[]));
   }
 
-  const { data: allCouriers } = await supabase
-    .from("couriers")
-    .select("id,provider,display_name")
-    .order("display_name");
+  let allCouriers: any[] = [];
+  if (activeTab === "couriers") {
+    allCouriers = await getAllCouriers();
+  }
 
   // Team members
   interface MemberRow {
@@ -101,51 +113,57 @@ export default async function SettingsPage({
   const members: Array<{ id: string; user_id: string; role: string; email?: string; full_name?: string; created_at: string }> = [];
   const invitations: Array<{ id: string; email: string; role: string; status: string; created_at: string; expires_at: string }> = [];
   
-  if (shop) {
+  if (activeTab === "team" && shop) {
     const orgId = shop.organization_id;
     
-    // 1. Fetch memberships
-    const { data: orgMemberships } = await admin
-      .from("memberships")
-      .select("id,user_id,role,created_at,profiles(full_name)")
-      .eq("organization_id", orgId);
+    // Fetch memberships, invitations, and users in parallel
+    const [{ data: orgMemberships }, { data: orgInvitations }, { data: { users } }] = await Promise.all([
+      admin
+        .from("memberships")
+        .select("id,user_id,role,created_at,profiles(full_name)")
+        .eq("organization_id", orgId),
+      supabase
+        .from("organization_invitations")
+        .select("id, email, role, status, created_at, expires_at")
+        .eq("organization_id", orgId)
+        .neq("status", "accepted")
+        .order("created_at", { ascending: false }),
+      admin.auth.admin.listUsers({ perPage: 1000 })
+    ]);
       
     if (orgMemberships) {
-      // Fetch emails via admin auth
+      const userMap = new Map(users.map((u) => [u.id, u]));
+      
       for (const m of orgMemberships as MemberRow[]) {
-        const { data: authUser } = await admin.auth.admin.getUserById(m.user_id);
+        const authUser = userMap.get(m.user_id);
         const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
         members.push({
           id: m.id,
           user_id: m.user_id,
           role: m.role,
-          email: authUser?.user?.email,
+          email: authUser?.email,
           full_name: profile?.full_name ?? undefined,
           created_at: m.created_at,
         });
       }
     }
 
-    // 2. Fetch pending/revoked invitations
-    const { data: orgInvitations } = await supabase
-      .from("organization_invitations")
-      .select("id, email, role, status, created_at, expires_at")
-      .eq("organization_id", orgId)
-      .neq("status", "accepted")
-      .order("created_at", { ascending: false });
-      
     if (orgInvitations) {
       invitations.push(...orgInvitations);
     }
   }
 
   // Recent security events for the current user
-  const { data: securityEvents } = await admin
-    .from("security_events")
-    .select("id,event_type,created_at,metadata")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(8);
+  let securityEvents: any[] = [];
+  if (activeTab === "security") {
+    const { data } = await admin
+      .from("security_events")
+      .select("id,event_type,created_at,metadata")
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(8);
+    securityEvents = data ?? [];
+  }
 
   // Telegram configuration status (check env without exposing token)
   const telegramConfigured = Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID);

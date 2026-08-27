@@ -36,7 +36,9 @@ type ProviderField = {
 const PROVIDER_FIELDS: Record<string, ProviderField[]> = {
   redx: [
     { key: "apiToken", label: "API Access Token", placeholder: "your-redx-api-token", isSecret: true },
-    { key: "baseUrl", label: "Base URL", placeholder: "https://api.redx.com.bd", optional: true, hint: "Override only if using a custom endpoint" }
+    { key: "environment", label: "Environment", placeholder: "production or sandbox", optional: true, hint: "Defaults to production" },
+    { key: "defaultWeightKg", label: "Default Parcel Weight (kg)", placeholder: "0.5", optional: true, hint: "Used if order doesn't have weight" },
+    { key: "defaultInstruction", label: "Default Instruction", placeholder: "Allow customer to open parcel", optional: true }
   ],
   pathao: [
     { key: "clientId", label: "Client ID", placeholder: "your-pathao-client-id" },

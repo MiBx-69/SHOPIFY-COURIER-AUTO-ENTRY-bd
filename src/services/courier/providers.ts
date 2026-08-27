@@ -101,48 +101,29 @@ export class RedxProvider implements CourierProvider {
   }
 
   private baseUrl(c: Record<string, string>) {
-    return base(c, process.env.REDX_API_URL || "https://openapi.redx.com.bd/v1.0.0-beta");
+    const isSandbox = (c.environment || "").toLowerCase() === "sandbox";
+    return isSandbox ? "https://sandbox.redx.com.bd/v1.0.0-beta" : "https://openapi.redx.com.bd/v1.0.0-beta";
   }
 
   async testConnection(c: Record<string, string>) {
     this.validateConfig(c);
     const token = redxToken(c.apiToken);
-    const { response, data } = await courierFetch(`${this.baseUrl(c)}/areas`, {
-      headers: { "API-ACCESS-TOKEN": token }
+    
+    // Test connection by subscribing
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/no-area-parcels/subscribe`, {
+      method: "POST",
+      headers: { "API-ACCESS-TOKEN": token, "Content-Type": "application/json" }
     });
+
     if (!response.ok) {
-      const err = (data as { message?: string })?.message || "REDX credentials were rejected";
+      const err = (data as { message?: string })?.message || "REDX subscription/test failed";
       throw new Error(err);
     }
   }
 
   async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
-    this.validateConfig(c);
-    const token = redxToken(c.apiToken);
-    try {
-      const { response, data } = await courierFetch(`${this.baseUrl(c)}/pickup/stores`, {
-        headers: { "API-ACCESS-TOKEN": token }
-      });
-      const d = data as { pickup_stores?: Array<Record<string, unknown>>; stores?: Array<Record<string, unknown>> };
-      const rawStores = d?.pickup_stores || d?.stores || [];
-
-      if (response.ok && Array.isArray(rawStores) && rawStores.length > 0) {
-        return rawStores.map((s) => ({
-          id: String(s.id || s.pickup_store_id || s.store_id),
-          courierLocationId: String(s.id || s.pickup_store_id || s.store_id),
-          name: String(s.name || s.store_name || "Main Warehouse"),
-          address: String(s.address || s.pickup_address || "Dhaka"),
-          phone: s.phone ? String(s.phone) : undefined,
-          city: (s.district_name || s.city) ? String(s.district_name || s.city) : undefined,
-          area: (s.area_name || s.area) ? String(s.area_name || s.area) : undefined,
-          isActive: s.status !== "inactive"
-        }));
-      }
-    } catch {
-      // Fallback below
-    }
-
-    // Default primary location if API returns empty
+    // RedX production payload no longer supports pickup locations (no-area-parcels).
+    // Return a generic default.
     return [
       {
         id: "redx_default_hub",
@@ -175,56 +156,31 @@ export class RedxProvider implements CourierProvider {
 
       const codAmount = Math.max(0, Math.round(Number(p.codAmount || 0)));
       const weight = Number(c.defaultWeightKg || 0.5) || 0.5;
+      const instruction = c.defaultInstruction || p.notes || "";
 
-      // Resolve delivery_area_id from REDX area lookup
-      let areaId: number = 1;
-      let areaName: string = p.area || p.city || "Dhaka";
-      if (p.postalCode) {
-        try {
-          const { response: areaRes, data: areaData } = await courierFetch(`${this.baseUrl(c)}/areas?post_code=${encodeURIComponent(p.postalCode)}`, {
-            headers: { "API-ACCESS-TOKEN": token }
-          });
-          if (areaRes.ok) {
-            const areaObj = areaData as { areas?: Array<{ id: number; name: string }> };
-            if (areaObj.areas && areaObj.areas.length > 0) {
-              const matched = areaObj.areas.find((a) => p.area && a.name.toLowerCase().includes(p.area.toLowerCase())) || areaObj.areas[0];
-              areaId = matched.id;
-              areaName = matched.name;
-            }
-          }
-        } catch {
-          // fallback to defaults
-        }
-      }
-
-      const payload: Record<string, unknown> = {
+      // Exactly the specified payload
+      const payload = {
         customer_name: p.customerName || "Customer",
         customer_phone: phone,
         customer_address: address,
-        delivery_address: address,
-        delivery_area: areaName,
-        delivery_area_id: areaId,
         merchant_invoice_id: String(p.orderNumber || p.orderId),
-        cash_collection_amount: codAmount,
-        value: codAmount > 0 ? codAmount : 500,
+        cash_collection_amount: String(codAmount),
         parcel_weight: weight,
-        instruction: p.notes || ""
+        instruction: instruction,
+        value: codAmount > 0 ? codAmount : 500
       };
 
-      if (p.pickupLocationId && p.pickupLocationId !== "redx_default_hub") {
-        const storeNum = Number(p.pickupLocationId);
-        payload.pickup_store_id = !isNaN(storeNum) && storeNum > 0 ? storeNum : p.pickupLocationId;
-      }
-
-      const { response, data } = await courierFetch(`${this.baseUrl(c)}/parcel`, {
+      const { response, data } = await courierFetch(`${this.baseUrl(c)}/no-area-parcels`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "API-ACCESS-TOKEN": token, "Idempotency-Key": key },
         body: JSON.stringify(payload)
       });
+
       const d = data as Record<string, unknown>;
-      const tracking = String(d.tracking_id || d.trackingId || d.parcel_id || "");
-      if ((response.status === 200 || response.status === 201) && tracking) {
-        return { outcome: "success", trackingId: tracking, courierReference: String(d.parcel_id || tracking), metadata: { status: response.status } };
+      const tracking = String(d.tracking_id || "");
+
+      if (response.status === 201 && tracking && tracking !== "undefined") {
+        return { outcome: "success", trackingId: tracking, courierReference: tracking, metadata: { status: response.status } };
       }
 
       const errorMsg = extractCourierErrorMessage(data, (d.message as string) || "REDX did not accept this shipment");
