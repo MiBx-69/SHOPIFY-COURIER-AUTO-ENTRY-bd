@@ -2,8 +2,10 @@
 
 -- 1. Alter Roles (We map the requested roles into our existing enum where possible, or add them)
 -- Add Developer and Staff roles
+COMMIT;
 ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'developer';
 ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'staff';
+BEGIN;
 
 -- 2. Create Types & Tables
 create type public.invitation_status as enum ('pending','accepted','expired','revoked');
