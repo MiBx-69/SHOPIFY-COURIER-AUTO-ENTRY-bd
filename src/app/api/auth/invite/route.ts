@@ -32,6 +32,7 @@ export async function POST(request: Request) {
         .single();
 
       if (membershipError || !membership || !['owner', 'admin'].includes(membership.role)) {
+        console.error("403 Auth Check Failed", { organization_id, userId: user.id, membership, membershipError });
         return NextResponse.json({ error: "Insufficient permissions to invite users to this organization" }, { status: 403 });
       }
     }
