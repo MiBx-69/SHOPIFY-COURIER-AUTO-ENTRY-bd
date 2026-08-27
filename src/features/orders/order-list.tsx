@@ -10,6 +10,7 @@ import {
   AlertCircle, 
   ChevronLeft, 
   ChevronRight, 
+  ChevronDown,
   X,
   CheckCircle2,
   AlertTriangle,
@@ -186,6 +187,7 @@ export function OrderList({
   
   // Advanced Filter State
   const [showFiltersDrawer, setShowFiltersDrawer] = useState(false);
+  const [showMobileTabsMenu, setShowMobileTabsMenu] = useState(false);
   const [filterDate, setFilterDate] = useState(initialDate);
   const [filterStartDate, setFilterStartDate] = useState(searchParams.get("startDate") || "");
   const [filterEndDate, setFilterEndDate] = useState(searchParams.get("endDate") || "");
@@ -714,7 +716,7 @@ export function OrderList({
     <div className="space-y-2 w-full min-w-0 max-w-full">
       {/* ─── 1. TOP CONTROLS & SEARCH BAR ─── */}
       <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2.5 sm:p-3 shadow-2xs w-full min-w-0">
-        <div className="flex items-center gap-1.5 sm:gap-2 w-full min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full min-w-0">
           {/* Search Input */}
           <div className="relative flex-1 min-w-0">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 shrink-0" />
@@ -821,35 +823,75 @@ export function OrderList({
 
         {/* ─── 2. PRIMARY TABS BAR (ORDERS MODE ONLY) ─── */}
         {!isDispatchedMode && (
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar border-t border-slate-100 pt-2 -mx-1 px-1">
-            {ORDERS_TABS.map((t) => {
-              const active = tab === t.id;
-              const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
+          <>
+            {/* Desktop Tabs (flex-wrap) */}
+            <div className="hidden md:flex flex-wrap items-center gap-1 border-t border-slate-100 pt-2 px-1">
+              {ORDERS_TABS.map((t) => {
+                const active = tab === t.id;
+                const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
 
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => handleTabChange(t.id)}
-                  className={cn(
-                    "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer",
-                    active
-                      ? "bg-slate-900 text-white font-semibold shadow-2xs"
-                      : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
-                  )}
-                >
-                  <span>{t.label}</span>
-                  {countVal !== null && (
-                    <span className={cn(
-                      "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
-                      active ? "bg-white/25 text-white" : "bg-slate-200 text-slate-600"
-                    )}>
-                      {countVal.toLocaleString()}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => handleTabChange(t.id)}
+                    className={cn(
+                      "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
+                      active
+                        ? "bg-slate-900 text-white font-semibold shadow-2xs"
+                        : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                    )}
+                  >
+                    <span>{t.label}</span>
+                    {countVal !== null && (
+                      <span className={cn(
+                        "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
+                        active ? "bg-white/25 text-white" : "bg-slate-200 text-slate-600"
+                      )}>
+                        {countVal.toLocaleString()}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Mobile Tabs */}
+            <div className="flex md:hidden flex-wrap items-center gap-1 border-t border-slate-100 pt-2 px-1">
+              {ORDERS_TABS.filter(t => ["all", "fulfilled", "unfulfilled", "dispatched"].includes(t.id)).map((t) => {
+                const active = tab === t.id;
+                const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
+
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => handleTabChange(t.id)}
+                    className={cn(
+                      "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
+                      active
+                        ? "bg-slate-900 text-white font-semibold shadow-2xs"
+                        : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                    )}
+                  >
+                    <span>{t.label}</span>
+                  </button>
+                );
+              })}
+              
+              {/* "More" Button */}
+              <button
+                onClick={() => setShowMobileTabsMenu(true)}
+                className={cn(
+                  "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
+                  !["all", "fulfilled", "unfulfilled", "dispatched"].includes(tab)
+                    ? "bg-slate-900 text-white font-semibold shadow-2xs"
+                    : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
+                )}
+              >
+                <span>{!["all", "fulfilled", "unfulfilled", "dispatched"].includes(tab) ? ORDERS_TABS.find(t => t.id === tab)?.label : "More"}</span>
+                <ChevronDown size={14} className={cn(!["all", "fulfilled", "unfulfilled", "dispatched"].includes(tab) ? "text-white/70" : "text-slate-400")} />
+              </button>
+            </div>
+          </>
         )}
 
         {/* Quick Date Pills on Mobile (Dispatched Mode Only) */}
@@ -1767,6 +1809,54 @@ export function OrderList({
             >
               Done
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── 13. MOBILE TABS BOTTOM SHEET ─── */}
+      {showMobileTabsMenu && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-xs md:hidden animate-in fade-in">
+          <div className="w-full max-h-[85vh] rounded-t-3xl bg-white p-5 shadow-2xl flex flex-col animate-in slide-in-from-bottom-full">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-100">
+              <h3 className="text-base font-bold text-slate-900">Order Status</h3>
+              <button onClick={() => setShowMobileTabsMenu(false)} className="rounded-full p-1.5 hover:bg-slate-100 text-slate-500">
+                <X size={18} />
+              </button>
+            </div>
+            
+            <div className="overflow-y-auto space-y-1 pb-4">
+              {ORDERS_TABS.map((t) => {
+                const active = tab === t.id;
+                const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
+                
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      handleTabChange(t.id);
+                      setShowMobileTabsMenu(false);
+                    }}
+                    className={cn(
+                      "w-full flex items-center justify-between p-3 rounded-xl transition-colors",
+                      active ? "bg-slate-900 text-white" : "hover:bg-slate-100 text-slate-700"
+                    )}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-sm">{t.label}</span>
+                      {active && <Check size={14} />}
+                    </div>
+                    {countVal !== null && (
+                      <span className={cn(
+                        "text-[11px] font-mono px-2 py-0.5 rounded-full",
+                        active ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                      )}>
+                        {countVal.toLocaleString()}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
