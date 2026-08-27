@@ -35,9 +35,13 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       {/* Compact Page Header */}
       <div className="mb-2.5 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <h1 className="text-lg font-bold tracking-tight text-slate-900">Orders</h1>
+          <h1 className="hidden sm:block text-lg font-bold tracking-tight text-slate-900">Orders</h1>
+          <div className="sm:hidden flex flex-col">
+            <h1 className="text-lg font-black tracking-tighter text-slate-900 leading-none">MiBx-Dispatch</h1>
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">Sync. Dispatch. Deliver. Done.</span>
+          </div>
           {shop && (
-            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            <span className="hidden sm:inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
               {shop.name}
             </span>
           )}

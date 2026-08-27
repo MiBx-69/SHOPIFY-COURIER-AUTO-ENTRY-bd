@@ -16,6 +16,7 @@ interface HealthData {
   responseMs?: number;
   services?: {
     database?: ServiceResult;
+    redis?: ServiceResult;
     couriers?: {
       redx?: ServiceResult;
       pathao?: ServiceResult;
@@ -61,6 +62,7 @@ function StatusBadge({ status, latencyMs }: ServiceResult) {
 
 const SERVICES: Array<{ key: string; label: string }> = [
   { key: "database", label: "Supabase Database" },
+  { key: "redis", label: "Upstash Redis Cache" },
   { key: "redx", label: "REDX Courier" },
   { key: "pathao", label: "Pathao Courier" },
   { key: "steadfast", label: "Steadfast Courier" },
@@ -90,6 +92,7 @@ export function SystemHealth() {
   function getServiceStatus(key: string): ServiceResult {
     if (loading || !health) return { status: "loading" };
     if (key === "database") return health.services?.database ?? { status: "offline" };
+    if (key === "redis") return health.services?.redis ?? { status: "offline" };
     return (health.services?.couriers as Record<string, ServiceResult> | undefined)?.[key] ?? { status: "offline" };
   }
 

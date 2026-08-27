@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser, apiError } from "@/lib/api/auth";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { redis, generateCacheKey } from "@/lib/redis";
 
 // Helper to compute date ranges
 function getDateRange(preset: string, startParam?: string | null, endParam?: string | null) {
@@ -35,6 +36,7 @@ function getDateRange(preset: string, startParam?: string | null, endParam?: str
 }
 
 export async function GET(request: NextRequest) {
+  const startTime = Date.now();
   try {
     const { user, supabase } = await currentUser();
     enforceRateLimit(`orders:${user.id}`, 90);
@@ -58,6 +60,27 @@ export async function GET(request: NextRequest) {
     const minAmount = p.get("minAmount") ? Number(p.get("minAmount")) * 100 : null;
     const maxAmount = p.get("maxAmount") ? Number(p.get("maxAmount")) * 100 : null;
 
+    // Cache-Aside Logic
+    const cacheKey = generateCacheKey(shopId, "orders:list", {
+      page, size, filter, search, datePreset, startDate, endDate, dateField, payment, fulfillment, courier, minAmount, maxAmount
+    });
+
+    if (redis) {
+      try {
+        const cached = await redis.get(cacheKey);
+        if (cached) {
+          return NextResponse.json(cached, {
+            headers: {
+              "X-Cache": "HIT",
+              "X-Response-Time": `${Date.now() - startTime}ms`
+            }
+          });
+        }
+      } catch (err) {
+        console.warn("Redis get failed:", err);
+      }
+    }
+
     // Fetch active skipped orders for this shop
     const { data: skipEvents } = await supabase
       .from("order_events")
@@ -80,7 +103,7 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("orders")
       .select(
-        "id,name,order_number,customer_name,customer_phone,customer_email,shipping_address,billing_address,note,total_minor,subtotal_minor,discount_minor,shipping_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor),dispatches(id,status,phase,tracking_id,courier_reference,courier_status,safe_error_message,dispatched_at,courier_configs(id,couriers(provider,display_name)))",
+        "id,name,order_number,customer_name,customer_phone,customer_email,shipping_address,billing_address,note,total_minor,subtotal_minor,discount_minor,shipping_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor,product_snapshot),dispatches(id,status,phase,tracking_id,courier_reference,courier_status,safe_error_message,dispatched_at,courier_configs(id,couriers(provider,display_name)))",
         { count: "estimated" }
       )
       .eq("shop_id", shopId)
@@ -256,12 +279,27 @@ export async function GET(request: NextRequest) {
       is_skipped: activeSkippedOrderIds.has(o.id)
     }));
 
-    return NextResponse.json({
+    const responsePayload = {
       data: enrichedData,
       count: count || 0,
       page,
       size,
       activeSkippedCount: activeSkippedOrderIds.size
+    };
+
+    if (redis) {
+      try {
+        await redis.set(cacheKey, responsePayload, { ex: 30 });
+      } catch (err) {
+        console.warn("Redis set failed:", err);
+      }
+    }
+
+    return NextResponse.json(responsePayload, {
+      headers: {
+        "X-Cache": "MISS",
+        "X-Response-Time": `${Date.now() - startTime}ms`
+      }
     });
   } catch (error) {
     return apiError(error);

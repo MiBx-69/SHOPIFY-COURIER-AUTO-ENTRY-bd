@@ -3,6 +3,7 @@ import { currentUser, apiError } from "@/lib/api/auth";
 import { redis } from "@/lib/redis";
 
 export async function GET(request: NextRequest) {
+  const startTime = Date.now();
   try {
     const { supabase } = await currentUser();
     const shopId = request.nextUrl.searchParams.get("shopId");
@@ -13,7 +14,14 @@ export async function GET(request: NextRequest) {
       try {
         const cached = await redis.get(cacheKey);
         if (cached) {
-          return NextResponse.json({ data: cached });
+          // If cached was stringified, parse it, otherwise use it directly
+          const data = typeof cached === 'string' ? JSON.parse(cached) : cached;
+          return NextResponse.json({ data }, {
+            headers: {
+              "X-Cache": "HIT",
+              "X-Response-Time": `${Date.now() - startTime}ms`
+            }
+          });
         }
       } catch (err) {
         console.warn("Redis cache read error:", err);
@@ -68,13 +76,18 @@ export async function GET(request: NextRequest) {
 
     if (redis) {
       try {
-        await redis.setex(cacheKey, 60, JSON.stringify(data));
+        await redis.set(cacheKey, data, { ex: 60 });
       } catch (err) {
         console.warn("Redis cache write error:", err);
       }
     }
 
-    return NextResponse.json({ data });
+    return NextResponse.json({ data }, {
+      headers: {
+        "X-Cache": "MISS",
+        "X-Response-Time": `${Date.now() - startTime}ms`
+      }
+    });
   } catch (error) {
     return apiError(error);
   }

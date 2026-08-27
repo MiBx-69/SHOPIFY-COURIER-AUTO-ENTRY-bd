@@ -25,9 +25,11 @@ import {
   ArrowRight,
   ExternalLink,
   MapPin,
-  Check
+  Check,
+  Copy
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ProductPreview } from "@/components/ui/product-preview";
 import { money, cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 import { 
@@ -45,6 +47,14 @@ type LineItem = {
   quantity: number;
   unit_price_minor: number;
   total_price_minor: number;
+  product_snapshot?: {
+    variant?: {
+      image?: {
+        url?: string;
+        altText?: string;
+      } | null;
+    } | null;
+  } | null;
 };
 
 type Order = {
@@ -113,14 +123,15 @@ type BulkResultItem = {
 };
 
 const ORDERS_TABS = [
+  { id: "all", label: "All Orders" },
   { id: "ready", label: "Ready to Dispatch" },
   { id: "unfulfilled", label: "Unfulfilled" },
   { id: "pending", label: "Pending Payment" },
   { id: "attention", label: "Attention Required" },
+  { id: "dispatched", label: "Dispatched" },
   { id: "skipped", label: "Skipped" },
   { id: "failed", label: "Failed" },
-  { id: "cancelled", label: "Cancelled" },
-  { id: "all", label: "All Orders" }
+  { id: "cancelled", label: "Cancelled" }
 ];
 
 const DISPATCHED_DATE_SHORTCUTS = [
@@ -208,6 +219,15 @@ export function OrderList({
   const [totalCount, setTotalCount] = useState(0);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null);
+  const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+
+  const copyPhone = (e: React.MouseEvent, phone: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(phone);
+    setCopiedPhone(phone);
+    setTimeout(() => setCopiedPhone(null), 2000);
+  };
 
   // Pickup Locations Cache State
   const [courierPickupMap, setCourierPickupMap] = useState<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>>({});
@@ -718,9 +738,9 @@ export function OrderList({
     <div className="space-y-2 w-full min-w-0 max-w-full">
       {/* ─── 1. TOP CONTROLS & SEARCH BAR ─── */}
       <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-2.5 sm:p-3 shadow-2xs w-full min-w-0">
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 w-full min-w-0">
+        <div className="flex flex-wrap md:flex-nowrap items-center gap-2 w-full min-w-0">
           {/* Search Input */}
-          <div className="relative flex-1 min-w-0">
+          <div className="relative flex-1 min-w-[200px]">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 shrink-0" />
             <input
               type="text"
@@ -759,7 +779,7 @@ export function OrderList({
                     key={ds.id || "all-time"}
                     onClick={() => handleDateShortcut(ds.id)}
                     className={cn(
-                      "h-8.5 px-2.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap",
+                      "h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap",
                       active
                         ? "bg-slate-900 text-white border-slate-900 shadow-2xs"
                         : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900"
@@ -779,7 +799,7 @@ export function OrderList({
                     key={ds.id}
                     onClick={() => handleDateShortcut(ds.id)}
                     className={cn(
-                      "h-8.5 px-2.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer whitespace-nowrap",
+                      "h-9 px-3 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer whitespace-nowrap",
                       active
                         ? "bg-slate-900 text-white border-slate-900 shadow-2xs"
                         : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-slate-900"
@@ -792,11 +812,10 @@ export function OrderList({
             </div>
           )}
 
-          {/* Filters Toggle Button */}
           <button
             onClick={() => setShowFiltersDrawer(true)}
             className={cn(
-              "flex h-8.5 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-medium transition-colors cursor-pointer shrink-0",
+              "flex h-9 items-center gap-1.5 rounded-lg border px-3 text-[13px] font-medium transition-colors cursor-pointer shrink-0",
               activeFiltersCount > 0
                 ? "bg-slate-900 text-white border-slate-900 shadow-2xs"
                 : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
@@ -820,82 +839,44 @@ export function OrderList({
             }}
             disabled={loading}
             title="Refresh orders"
-            className="flex h-8.5 w-8.5 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 transition-colors cursor-pointer"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 transition-colors cursor-pointer"
           >
-            <RefreshCw size={13} className={cn(loading && "animate-spin text-slate-900")} />
+            <RefreshCw size={14} className={cn(loading && "animate-spin text-slate-900")} />
           </button>
         </div>
 
         {/* ─── 2. PRIMARY TABS BAR (ORDERS MODE ONLY) ─── */}
         {!isDispatchedMode && (
           <>
-            {/* Desktop Tabs (flex-wrap) */}
-            <div className="hidden md:flex flex-wrap items-center gap-1 border-t border-slate-100 pt-2 px-1">
-              {ORDERS_TABS.map((t) => {
-                const active = tab === t.id;
-                const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar border-t border-slate-100 pt-3 pb-1 w-full">
+            {ORDERS_TABS.map((t) => {
+              const active = tab === t.id;
+              const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
 
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => handleTabChange(t.id)}
-                    className={cn(
-                      "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
-                      active
-                        ? "bg-slate-900 text-white font-semibold shadow-2xs"
-                        : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
-                    )}
-                  >
-                    <span>{t.label}</span>
-                    {countVal !== null && (
-                      <span className={cn(
-                        "text-[10px] font-mono px-1.5 py-0.2 rounded-full",
-                        active ? "bg-white/25 text-white" : "bg-slate-200 text-slate-600"
-                      )}>
-                        {countVal.toLocaleString()}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Mobile Tabs */}
-            <div className="flex md:hidden flex-wrap items-center gap-1 border-t border-slate-100 pt-2 px-1">
-              {ORDERS_TABS.filter(t => ["all", "fulfilled", "unfulfilled", "dispatched"].includes(t.id)).map((t) => {
-                const active = tab === t.id;
-                const countVal = counts ? (counts[t.id as keyof TabCounts] ?? null) : null;
-
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => handleTabChange(t.id)}
-                    className={cn(
-                      "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
-                      active
-                        ? "bg-slate-900 text-white font-semibold shadow-2xs"
-                        : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
-                    )}
-                  >
-                    <span>{t.label}</span>
-                  </button>
-                );
-              })}
-              
-              {/* "More" Button */}
-              <button
-                onClick={() => setShowMobileTabsMenu(true)}
-                className={cn(
-                  "h-7 px-2.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
-                  !["all", "fulfilled", "unfulfilled", "dispatched"].includes(tab)
-                    ? "bg-slate-900 text-white font-semibold shadow-2xs"
-                    : "bg-slate-100/70 text-slate-600 hover:bg-slate-200/80 hover:text-slate-900"
-                )}
-              >
-                <span>{!["all", "fulfilled", "unfulfilled", "dispatched"].includes(tab) ? ORDERS_TABS.find(t => t.id === tab)?.label : "More"}</span>
-                <ChevronDown size={14} className={cn(!["all", "fulfilled", "unfulfilled", "dispatched"].includes(tab) ? "text-white/70" : "text-slate-400")} />
-              </button>
-            </div>
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => handleTabChange(t.id)}
+                  className={cn(
+                    "h-10 px-3.5 rounded-xl text-[13px] font-medium transition-colors whitespace-nowrap flex items-center gap-2 cursor-pointer shrink-0 border border-transparent",
+                    active
+                      ? "bg-slate-900 text-white shadow-2xs"
+                      : "bg-slate-50 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
+                  )}
+                >
+                  <span>{t.label}</span>
+                  {countVal !== null && (
+                    <span className={cn(
+                      "text-[11px] font-mono px-2 py-0.5 rounded-full font-bold",
+                      active ? "bg-white/20 text-white" : "bg-slate-200/70 text-slate-600"
+                    )}>
+                      {countVal.toLocaleString()}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
           </>
         )}
 
@@ -1132,20 +1113,28 @@ export function OrderList({
                     <td className="px-2.5 py-1.5 max-w-[140px] truncate text-slate-700" title={order.customer_name || "—"}>
                       <span className="font-medium truncate block">{order.customer_name || "—"}</span>
                       {order.customer_phone ? (
-                        <span className="text-[11px] text-slate-400 font-mono block truncate">{order.customer_phone}</span>
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-[11px] text-slate-500 font-mono truncate">{order.customer_phone}</span>
+                          <button
+                            onClick={(e) => copyPhone(e, order.customer_phone!)}
+                            className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
+                            title="Copy phone number"
+                          >
+                            {copiedPhone === order.customer_phone ? (
+                              <Check size={10} className="text-emerald-600" />
+                            ) : (
+                              <Copy size={10} />
+                            )}
+                          </button>
+                        </div>
                       ) : (
                         <span className="text-[10px] text-amber-600 font-medium block">No Phone</span>
                       )}
                     </td>
 
                     {/* Items */}
-                    <td className="px-2.5 py-1.5 whitespace-nowrap text-slate-600">
-                      <span 
-                        className="cursor-default border-b border-dotted border-slate-300"
-                        title={order.order_line_items?.map((i) => `${i.quantity}x ${i.title}${i.sku ? ` (${i.sku})` : ""}`).join("\n")}
-                      >
-                        {totalItemCount} {totalItemCount === 1 ? "item" : "items"}
-                      </span>
+                    <td className="px-2.5 py-1.5 align-top">
+                      <ProductPreview items={order.order_line_items || []} maxVisible={1} />
                     </td>
 
                     {/* Total */}
@@ -1340,13 +1329,30 @@ export function OrderList({
                   </div>
 
                   {/* Row 2: Customer Name + Phone */}
-                  <div className="flex items-center justify-between gap-1 text-[11px] text-slate-600 mt-0.5">
+                  <div className="flex items-center justify-between gap-1 text-[11px] text-slate-600 mt-1">
                     <span className="font-medium text-slate-800 truncate">{order.customer_name || "Customer"}</span>
                     {order.customer_phone ? (
-                      <span className="font-mono text-[10px] text-slate-400 shrink-0">{order.customer_phone}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="font-mono text-[10px] text-slate-500">{order.customer_phone}</span>
+                        <button
+                          onClick={(e) => copyPhone(e, order.customer_phone!)}
+                          className="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                        >
+                          {copiedPhone === order.customer_phone ? (
+                            <Check size={11} className="text-emerald-600" />
+                          ) : (
+                            <Copy size={11} />
+                          )}
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-[10px] text-amber-600 font-medium shrink-0">No phone</span>
                     )}
+                  </div>
+
+                  {/* Row 2.5: Product Preview */}
+                  <div className="mt-2.5">
+                    <ProductPreview items={order.order_line_items || []} maxVisible={2} />
                   </div>
 
                   {/* Row 3: Status Badges + Action */}
