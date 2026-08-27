@@ -8,9 +8,13 @@ ALTER TYPE public.app_role ADD VALUE IF NOT EXISTS 'staff';
 BEGIN;
 
 -- 2. Create Types & Tables
-create type public.invitation_status as enum ('pending','accepted','expired','revoked');
+DO $$ BEGIN
+    create type public.invitation_status as enum ('pending','accepted','expired','revoked');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
 
-create table public.organization_invitations (
+create table if not exists public.organization_invitations (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
   email text not null,
@@ -28,11 +32,12 @@ create table public.organization_invitations (
 );
 
 -- Ensure an email can only have one pending invitation per organization
-create unique index idx_org_invitations_pending_email on public.organization_invitations (organization_id, lower(email)) where status = 'pending';
+create unique index if not exists idx_org_invitations_pending_email on public.organization_invitations (organization_id, lower(email)) where status = 'pending';
+drop trigger if exists organization_invitations_touch on public.organization_invitations;
 create trigger organization_invitations_touch before update on public.organization_invitations for each row execute function private.touch_updated_at();
 
 -- Audit Logs Table
-create table public.audit_logs (
+create table if not exists public.audit_logs (
   id uuid primary key default gen_random_uuid(),
   actor_id uuid references auth.users(id) on delete set null,
   actor_role text,
@@ -49,6 +54,7 @@ alter table public.organization_invitations enable row level security;
 alter table public.audit_logs enable row level security;
 
 -- Admin/Owner access to invitations
+drop policy if exists "Owners and Admins can view org invitations" on public.organization_invitations;
 create policy "Owners and Admins can view org invitations" on public.organization_invitations
   for select using (
     exists (
@@ -61,6 +67,7 @@ create policy "Owners and Admins can view org invitations" on public.organizatio
     (auth.jwt()->'user_metadata'->>'app_role' = 'developer')
   );
 
+drop policy if exists "Owners and Admins can manage org invitations" on public.organization_invitations;
 create policy "Owners and Admins can manage org invitations" on public.organization_invitations
   for all using (
     exists (
@@ -74,6 +81,7 @@ create policy "Owners and Admins can manage org invitations" on public.organizat
   );
 
 -- Audit logs are viewable by admins and developers
+drop policy if exists "Admins and developers can view audit logs" on public.audit_logs;
 create policy "Admins and developers can view audit logs" on public.audit_logs
   for select using (
     exists (
@@ -87,6 +95,7 @@ create policy "Admins and developers can view audit logs" on public.audit_logs
   );
 
 -- Insert policy for audit logs allows any authenticated user (their own actions) or developers
+drop policy if exists "Authenticated users can insert audit logs" on public.audit_logs;
 create policy "Authenticated users can insert audit logs" on public.audit_logs
   for insert with check (
     actor_id = auth.uid()
