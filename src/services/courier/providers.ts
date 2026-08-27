@@ -102,9 +102,9 @@ export class RedxProvider implements CourierProvider {
 
   getCapabilities() {
     return {
-      supportsPickupLocations: false,
-      supportsPerShipmentPickupLocation: false,
-      supportsPickupLocationSync: false,
+      supportsPickupLocations: true,
+      supportsPerShipmentPickupLocation: true,
+      supportsPickupLocationSync: true,
       supportsCancellation: true
     };
   }
@@ -130,8 +130,30 @@ export class RedxProvider implements CourierProvider {
     }
   }
 
-  async getPickupLocations(_c: CourierCredentials): Promise<PickupLocation[]> {
-    // RedX production payload no longer supports pickup locations (no-area-parcels).
+  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+    this.validateConfig(c);
+    const token = redxToken(c.apiToken);
+    
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/stores`, {
+      headers: { "API-ACCESS-TOKEN": token }
+    });
+
+    const d = data as { store_list?: Array<Record<string, unknown>> };
+    const rawList = Array.isArray(d?.store_list) ? d.store_list : [];
+
+    if (response.ok && rawList.length > 0) {
+      return rawList.map((s) => ({
+        id: String(s.id),
+        courierLocationId: String(s.id),
+        name: String(s.name || `Store #${s.id}`),
+        address: String(s.address || ""),
+        phone: s.phone ? String(s.phone) : undefined,
+        city: s.city ? String(s.city) : undefined,
+        area: s.area ? String(s.area) : undefined,
+        isActive: true
+      }));
+    }
+
     return [];
   }
 
@@ -158,7 +180,7 @@ export class RedxProvider implements CourierProvider {
       const instruction = c.defaultInstruction || p.notes || "";
 
       // Exactly the specified payload
-      const payload = {
+      const payload: Record<string, any> = {
         customer_name: p.customerName || "Customer",
         customer_phone: phone,
         customer_address: address,
@@ -168,6 +190,13 @@ export class RedxProvider implements CourierProvider {
         instruction: instruction,
         value: codAmount > 0 ? codAmount : 500
       };
+
+      if (p.pickupLocationId) {
+        const storeId = Number(p.pickupLocationId);
+        if (!isNaN(storeId) && storeId > 0) {
+          payload.pickup_store_id = storeId;
+        }
+      }
 
       const { response, data } = await courierFetch(`${this.baseUrl(c)}/no-area-parcels`, {
         method: "POST",
