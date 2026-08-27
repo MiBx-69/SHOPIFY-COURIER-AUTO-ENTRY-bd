@@ -49,15 +49,28 @@ export default async function SettingsPage({
 
   const shop = shops?.[0] ?? null;
 
-  // Fetch membership & role
-  const { data: membership } = shop
-    ? await admin
-        .from("memberships")
-        .select("role")
-        .eq("user_id", user.id)
-        .limit(1)
-        .maybeSingle()
-    : { data: null };
+  // Parallelize the queries that depend on `shop`
+  let membership: { role: string } | null = null;
+  const courierConfigs: CourierConfig[] = [];
+  let allCouriers: any[] = [];
+
+  const [membershipRes, courierConfigsRes, allCouriersRes] = await Promise.all([
+    shop ? admin.from("memberships").select("role").eq("user_id", user.id).limit(1).maybeSingle() : Promise.resolve({ data: null }),
+    ((activeTab === "couriers" || activeTab === "dispatch") && shop)
+      ? supabase
+          .from("courier_configs")
+          .select(`id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)`)
+          .eq("shop_id", shop.id)
+          .order("priority")
+      : Promise.resolve({ data: [] }),
+    activeTab === "couriers" ? getAllCouriers() : Promise.resolve([])
+  ]);
+
+  membership = membershipRes.data;
+  if (courierConfigsRes.data) {
+    courierConfigs.push(...(courierConfigsRes.data as unknown as CourierConfig[]));
+  }
+  allCouriers = allCouriersRes;
 
   // Fetch full installation details (admin client — shopify_installations is not RLS-exposed)
   let installation: {
@@ -84,22 +97,6 @@ export default async function SettingsPage({
     installation = inst;
     ordersCount = oCount || 0;
     webhooksCount = wCount || 0;
-  }
-
-  // Courier configs
-  const courierConfigs: CourierConfig[] = [];
-  if ((activeTab === "couriers" || activeTab === "dispatch") && shop) {
-    const { data: configs } = await supabase
-      .from("courier_configs")
-      .select(`id,enabled,priority,connection_status,last_tested_at,last_test_latency_ms,last_error_message,credentials_last_updated_at,courier_id,couriers(provider,display_name)`)
-      .eq("shop_id", shop.id)
-      .order("priority");
-    courierConfigs.push(...((configs ?? []) as unknown as CourierConfig[]));
-  }
-
-  let allCouriers: any[] = [];
-  if (activeTab === "couriers") {
-    allCouriers = await getAllCouriers();
   }
 
   // Team members

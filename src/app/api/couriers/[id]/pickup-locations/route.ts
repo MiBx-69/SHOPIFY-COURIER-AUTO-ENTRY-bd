@@ -30,9 +30,27 @@ export async function GET(
     const provider = courierRegistry.get(courierMeta.provider as any);
     const capabilities = provider.getCapabilities();
 
-    const dbStart = performance.now();
+    if (!capabilities.supportsPickupLocationSync) {
+      const totalMs = performance.now() - start;
+      return NextResponse.json({ 
+        success: true,
+        data: {
+          supported: false,
+          locations: [],
+          selectedLocationId: null,
+          reason: "provider_api_does_not_expose_pickup_selection"
+        },
+        metrics: {
+          authMs,
+          configDbMs: 0, // In this particular flow, config was already loaded
+          pickupDbMs: 0,
+          redisMs: 0,
+          totalMs: Math.round(totalMs)
+        }
+      });
+    }
+
     const data = await PickupLocationService.get(id, config.shop_id);
-    const dbMs = performance.now() - dbStart;
 
     const totalMs = performance.now() - start;
 
@@ -42,11 +60,13 @@ export async function GET(
         supported: capabilities.supportsPickupLocationSync,
         locations: data.locations,
         selectedLocationId: data.defaultLocationId,
-        reason: capabilities.supportsPickupLocationSync ? null : "provider_api_does_not_expose_pickup_selection"
+        reason: null
       },
       metrics: {
         authMs,
-        dbMs,
+        configDbMs: 0,
+        pickupDbMs: data.dbMs,
+        redisMs: data.redisMs,
         totalMs: Math.round(totalMs)
       }
     });

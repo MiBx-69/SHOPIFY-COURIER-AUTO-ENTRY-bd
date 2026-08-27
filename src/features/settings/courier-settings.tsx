@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { CheckCircle2, XCircle, RefreshCw, Trash2, ChevronDown, ChevronUp, Loader2, MapPin, Check, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SecretInput } from "@/components/ui/secret-input";
@@ -114,12 +115,25 @@ function CourierCard({
   const hasCredentials = Boolean(config.credentials_last_updated_at);
   const status = config.connection_status as IntegrationStatus;
 
+  const router = useRouter();
+  const abortControllerRef = useRef<AbortController | null>(null);
+
   // ── Load Pickup Locations ──────────────────────────────────────────────────
   const loadPickupLocations = useCallback(async () => {
     if (!hasCredentials) return;
     setLoadingLocations(true);
+    
+    // Abort previous requests
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const res = await fetch(`/api/couriers/${config.id}/pickup-locations`);
+      const res = await fetch(`/api/couriers/${config.id}/pickup-locations`, {
+        signal: controller.signal
+      });
       if (res.ok) {
         const json = await res.json();
         setPickupSupported(json.data?.supported ?? null);
@@ -128,8 +142,10 @@ function CourierCard({
         setDefaultLocationId(json.data?.selectedLocationId);
         setHasLoadedLocations(true);
       }
-    } catch {
-      // Non-blocking
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        // Non-blocking
+      }
     } finally {
       setLoadingLocations(false);
     }
@@ -139,8 +155,18 @@ function CourierCard({
   const syncPickupLocations = async () => {
     setSyncingLocations(true);
     setStatusMsg(null);
+    
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     try {
-      const res = await fetch(`/api/couriers/${config.id}/pickup-locations/sync`, { method: "POST" });
+      const res = await fetch(`/api/couriers/${config.id}/pickup-locations/sync`, { 
+        method: "POST",
+        signal: controller.signal
+      });
       const json = await res.json();
       if (res.ok) {
         setPickupSupported(json.data?.supported ?? null);
@@ -151,8 +177,10 @@ function CourierCard({
       } else {
         setStatusMsg(json.error || "Failed to refresh pickup locations");
       }
-    } catch {
-      setStatusMsg("Network error while syncing pickup locations");
+    } catch (e: any) {
+      if (e.name !== "AbortError") {
+        setStatusMsg("Network error while syncing pickup locations");
+      }
     } finally {
       setSyncingLocations(false);
     }
@@ -251,26 +279,43 @@ function CourierCard({
     setBusy(false);
   }
 
+  const [isDeleted, setIsDeleted] = useState(false);
+
   async function removeConfig() {
+    // 1. Immediately mark courier card as deleting.
     setBusy(true);
-    setStatusMsg(null);
+    setStatusMsg("Removing...");
+    
+    // 2 & 3. Cancel any in-flight pickup request and disable features
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
     try {
+      // 4. DELETE courier
       const res = await fetch(`/api/couriers/${config.id}`, { method: "DELETE" });
       if (res.ok) {
-        setStatusMsg("Removed.");
-        window.location.reload();
+        // 5. On success remove the card from state or refresh once
+        setIsDeleted(true);
+        router.refresh();
       } else {
         const json = (await res.json()) as { error?: string };
         setStatusMsg(json.error ?? "Failed to remove");
+        setBusy(false);
+        setConfirmDelete(false);
       }
     } catch {
       setStatusMsg("Network error — please try again");
+      setBusy(false);
+      setConfirmDelete(false);
     }
-    setBusy(false);
-    setConfirmDelete(false);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
+  
+  if (isDeleted) {
+    return null;
+  }
 
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xs transition-shadow hover:shadow-xs">
@@ -613,6 +658,7 @@ function EmptyCourierCard({
   courierId: string;
   shopId: string;
 }) {
+  const router = useRouter();
   const [configuring, setConfiguring] = useState(false);
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);

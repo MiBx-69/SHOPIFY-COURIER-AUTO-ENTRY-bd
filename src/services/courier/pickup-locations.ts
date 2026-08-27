@@ -97,25 +97,32 @@ export class PickupLocationService {
   }
 
   /** Retrieve cached locations from DB/Redis. Does NOT automatically trigger sync. */
-  static async get(courierConfigId: string, shopId: string): Promise<{ locations: PickupLocation[]; defaultLocationId?: string }> {
+  static async get(courierConfigId: string, shopId: string): Promise<{ locations: PickupLocation[]; defaultLocationId?: string; redisMs: number; dbMs: number }> {
     const admin = createAdminClient();
     
+    let redisMs = 0;
+    let dbMs = 0;
+
     // Check Redis cache first
     let cachedLocs: PickupLocation[] | null = null;
     const cacheKey = generateCacheKey(shopId, "pickup_locations", { courierConfigId });
     
     if (redis) {
+      const redisStart = performance.now();
       cachedLocs = await redis.get<PickupLocation[]>(cacheKey);
+      redisMs = performance.now() - redisStart;
     }
 
     if (!cachedLocs) {
       // Fetch from normalized DB table
+      const dbStart = performance.now();
       const { data: dbLocs } = await admin
         .from("courier_pickup_locations")
         .select("*")
         .eq("shop_id", shopId)
         .eq("courier_config_id", courierConfigId)
         .order("name", { ascending: true });
+      dbMs += performance.now() - dbStart;
 
       if (dbLocs) {
         cachedLocs = dbLocs.map(d => ({
@@ -138,14 +145,16 @@ export class PickupLocationService {
     }
 
     // Fetch the explicit preference
+    const prefStart = performance.now();
     const { data: pref } = await admin
       .from("courier_pickup_preferences")
       .select("pickup_location_id")
       .eq("shop_id", shopId)
       .eq("courier_config_id", courierConfigId)
       .maybeSingle();
+    dbMs += performance.now() - prefStart;
 
-    return { locations: cachedLocs, defaultLocationId: pref?.pickup_location_id };
+    return { locations: cachedLocs, defaultLocationId: pref?.pickup_location_id, redisMs, dbMs };
   }
 
   /** Set default pickup location */
