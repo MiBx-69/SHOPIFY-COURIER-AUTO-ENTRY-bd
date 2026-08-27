@@ -102,8 +102,11 @@ function CourierCard({
   // Pickup Locations State
   const [pickupLocations, setPickupLocations] = useState<PickupLocation[]>([]);
   const [defaultLocationId, setDefaultLocationId] = useState<string | undefined>(undefined);
+  const [pickupSupported, setPickupSupported] = useState<boolean | null>(null);
+  const [pickupReason, setPickupReason] = useState<string | null>(null);
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [syncingLocations, setSyncingLocations] = useState(false);
+  const [hasLoadedLocations, setHasLoadedLocations] = useState(false);
 
   const provider = config.couriers.provider;
   const displayName = config.couriers.display_name;
@@ -119,8 +122,11 @@ function CourierCard({
       const res = await fetch(`/api/couriers/${config.id}/pickup-locations`);
       if (res.ok) {
         const json = await res.json();
+        setPickupSupported(json.data?.supported ?? null);
+        setPickupReason(json.data?.reason ?? null);
         setPickupLocations(json.data?.locations || []);
-        setDefaultLocationId(json.data?.defaultLocationId);
+        setDefaultLocationId(json.data?.selectedLocationId);
+        setHasLoadedLocations(true);
       }
     } catch {
       // Non-blocking
@@ -137,9 +143,11 @@ function CourierCard({
       const res = await fetch(`/api/couriers/${config.id}/pickup-locations/sync`, { method: "POST" });
       const json = await res.json();
       if (res.ok) {
+        setPickupSupported(json.data?.supported ?? null);
+        setPickupReason(json.data?.reason ?? null);
         setPickupLocations(json.data?.locations || []);
-        setDefaultLocationId(json.data?.defaultLocationId);
-        setStatusMsg("Pickup locations refreshed successfully from courier account.");
+        setDefaultLocationId(json.data?.selectedLocationId);
+        setStatusMsg(json.message || "Pickup locations refreshed successfully.");
       } else {
         setStatusMsg(json.error || "Failed to refresh pickup locations");
       }
@@ -181,7 +189,6 @@ function CourierCard({
       if (res.ok && json.data?.connected) {
         setTestResult({ ok: true, msg: "Authentication successful", latencyMs: json.data.latencyMs, testedAt: json.data.testedAt });
         setConfig((c) => ({ ...c, connection_status: "connected", last_tested_at: json.data!.testedAt, last_test_latency_ms: json.data!.latencyMs, last_error_message: null }));
-        loadPickupLocations();
       } else {
         setTestResult({ ok: false, msg: json.error ?? "Connection test failed" });
         setConfig((c) => ({ ...c, connection_status: "failed" }));
@@ -204,7 +211,7 @@ function CourierCard({
       });
       const json = (await res.json()) as { error?: string };
       if (res.ok) {
-        setStatusMsg("Credentials saved. Testing connection and syncing pickup locations...");
+        setStatusMsg("Credentials saved. You can test your connection when ready.");
         setReplacing(false);
         setFormValues({});
         setConfig((c) => ({
@@ -213,7 +220,6 @@ function CourierCard({
           credentials_last_updated_at: new Date().toISOString(),
           last_error_message: null
         }));
-        await syncPickupLocations();
       } else {
         setStatusMsg(json.error ?? "Failed to save credentials");
       }
@@ -301,7 +307,7 @@ function CourierCard({
             onClick={() => {
               const next = !expanded;
               setExpanded(next);
-              if (next && hasCredentials) {
+              if (next && hasCredentials && !hasLoadedLocations) {
                 loadPickupLocations();
               }
             }}
@@ -373,18 +379,20 @@ function CourierCard({
                 <div className="flex items-center gap-2">
                   <MapPin size={15} className="text-slate-600" />
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                    Pickup Locations ({pickupLocations.length})
+                    Pickup Locations {pickupSupported !== false && `(${pickupLocations.length})`}
                   </h4>
                 </div>
-                <Button
-                  variant="secondary"
-                  onClick={syncPickupLocations}
-                  disabled={syncingLocations}
-                  className="h-7 text-[11px] px-2.5 gap-1.5"
-                >
-                  <RefreshCw size={11} className={cn(syncingLocations && "animate-spin")} />
-                  Refresh Locations
-                </Button>
+                {pickupSupported !== false && (
+                  <Button
+                    variant="secondary"
+                    onClick={syncPickupLocations}
+                    disabled={syncingLocations || loadingLocations}
+                    className="h-7 text-[11px] px-2.5 gap-1.5"
+                  >
+                    <RefreshCw size={11} className={cn((syncingLocations || loadingLocations) && "animate-spin")} />
+                    Refresh Locations
+                  </Button>
+                )}
               </div>
 
               {loadingLocations ? (
@@ -392,12 +400,19 @@ function CourierCard({
                   <Loader2 size={13} className="animate-spin" />
                   Loading courier pickup locations...
                 </div>
+              ) : pickupSupported === false ? (
+                <div className="rounded-lg border border-slate-200 bg-slate-100 p-4 text-center">
+                  <AlertTriangle size={18} className="mx-auto text-amber-500 mb-2" />
+                  <p className="text-xs text-slate-600 font-medium">
+                    {provider.toUpperCase()} pickup location is managed by your {provider.toUpperCase()} merchant account for this API endpoint.
+                  </p>
+                </div>
               ) : pickupLocations.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-3 text-center">
+                <div className="rounded-lg border border-dashed border-slate-300 bg-white p-4 text-center">
                   <p className="text-xs text-slate-500">No pickup locations found for this courier account.</p>
                   <button
                     onClick={syncPickupLocations}
-                    className="mt-1 text-xs font-semibold text-slate-900 underline hover:text-slate-700"
+                    className="mt-2 text-xs font-semibold text-slate-900 underline hover:text-slate-700"
                   >
                     Sync from courier account
                   </button>
@@ -425,7 +440,7 @@ function CourierCard({
                             </div>
                             {isDefault && (
                               <span className="inline-flex items-center gap-1 rounded bg-slate-900 px-1.5 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
-                                <Check size={9} /> Default
+                                <Check size={9} /> Selected
                               </span>
                             )}
                           </div>
@@ -434,7 +449,7 @@ function CourierCard({
                         <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400 pt-1 border-t border-slate-100">
                           <span>{loc.phone || "No phone"}</span>
                           {!isDefault && (
-                            <span className="text-slate-500 font-medium hover:text-slate-900">Set default</span>
+                            <span className="text-slate-500 font-medium hover:text-slate-900">Select pickup</span>
                           )}
                         </div>
                       </div>

@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptSecret } from "@/lib/security/crypto";
 import { courierRegistry } from "@/services/courier/registry";
 import type { PickupLocation } from "@/types/domain";
+import { redis, generateCacheKey } from "@/lib/redis";
 
 export class PickupLocationService {
   /** Fetch and synchronize pickup locations from courier API */
@@ -20,34 +21,121 @@ export class PickupLocationService {
     const courierMeta = config.couriers as unknown as { provider: "redx" | "pathao" | "steadfast"; display_name: string };
     const provider = courierRegistry.get(courierMeta.provider);
 
-    const { data: secret, error: secretErr } = await admin
-      .from("courier_secrets")
-      .select("ciphertext, iv, auth_tag")
-      .eq("courier_config_id", courierConfigId)
-      .single();
+    // Prevent concurrent syncs using Redis lock if available
+    const lockKey = `mibx:lock:pickup_sync:${courierConfigId}`;
+    if (redis) {
+      const locked = await redis.setnx(lockKey, "locked");
+      if (!locked) {
+        throw new Error("A synchronization is already in progress. Please try again in a few moments.");
+      }
+      await redis.expire(lockKey, 30);
+    }
 
-    if (secretErr || !secret) throw new Error("Courier credentials not configured");
+    try {
+      const { data: secret, error: secretErr } = await admin
+        .from("courier_secrets")
+        .select("ciphertext, iv, auth_tag")
+        .eq("courier_config_id", courierConfigId)
+        .single();
 
-    const credentials = decryptSecret({
-      ciphertext: secret.ciphertext,
-      iv: secret.iv,
-      authTag: secret.auth_tag
-    });
+      if (secretErr || !secret) throw new Error("Courier credentials not configured");
 
-    const locations = await provider.getPickupLocations(credentials);
+      const credentials = decryptSecret({
+        ciphertext: secret.ciphertext,
+        iv: secret.iv,
+        authTag: secret.auth_tag
+      });
 
-    // Save cache (scoped by shop_id and courier_config_id)
-    const filterKey = `courier_locations_cache_${courierConfigId}`;
-    await admin.from("saved_filters").upsert(
-      {
-        shop_id: shopId,
-        user_id: userId,
-        name: filterKey,
-        filters: { locations, synced_at: new Date().toISOString() },
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "shop_id, user_id, name" }
-    );
+      const capabilities = provider.getCapabilities();
+      
+      let locations: PickupLocation[] = [];
+      if (capabilities.supportsPickupLocationSync) {
+        locations = await provider.getPickupLocations(credentials);
+      }
+
+      // Upsert locations to the new normalized table
+      if (locations.length > 0) {
+        const payload = locations.map((loc) => ({
+          shop_id: shopId,
+          courier_config_id: courierConfigId,
+          provider: courierMeta.provider,
+          courier_location_id: loc.courierLocationId,
+          name: loc.name,
+          address: loc.address || null,
+          phone: loc.phone || null,
+          area: loc.area || null,
+          city: loc.city || null,
+          is_active: loc.isActive,
+          last_synced_at: new Date().toISOString()
+        }));
+
+        await admin.from("courier_pickup_locations").upsert(payload, { 
+          onConflict: "courier_config_id, courier_location_id" 
+        });
+      }
+
+      // Fetch the explicit preference
+      const { data: pref } = await admin
+        .from("courier_pickup_preferences")
+        .select("pickup_location_id")
+        .eq("shop_id", shopId)
+        .eq("courier_config_id", courierConfigId)
+        .maybeSingle();
+
+      const defaultLocationId = pref?.pickup_location_id;
+
+      // Invalidate Redis cache
+      if (redis) {
+        const cacheKey = generateCacheKey(shopId, "pickup_locations", { courierConfigId });
+        await redis.del(cacheKey);
+      }
+
+      return { locations, defaultLocationId };
+    } finally {
+      if (redis) await redis.del(lockKey);
+    }
+  }
+
+  /** Retrieve cached locations from DB/Redis. Does NOT automatically trigger sync. */
+  static async get(courierConfigId: string, shopId: string): Promise<{ locations: PickupLocation[]; defaultLocationId?: string }> {
+    const admin = createAdminClient();
+    
+    // Check Redis cache first
+    let cachedLocs: PickupLocation[] | null = null;
+    const cacheKey = generateCacheKey(shopId, "pickup_locations", { courierConfigId });
+    
+    if (redis) {
+      cachedLocs = await redis.get<PickupLocation[]>(cacheKey);
+    }
+
+    if (!cachedLocs) {
+      // Fetch from normalized DB table
+      const { data: dbLocs } = await admin
+        .from("courier_pickup_locations")
+        .select("*")
+        .eq("shop_id", shopId)
+        .eq("courier_config_id", courierConfigId)
+        .order("name", { ascending: true });
+
+      if (dbLocs) {
+        cachedLocs = dbLocs.map(d => ({
+          id: d.id,
+          courierLocationId: d.courier_location_id,
+          name: d.name,
+          address: d.address || undefined,
+          phone: d.phone || undefined,
+          city: d.city || undefined,
+          area: d.area || undefined,
+          isActive: d.is_active
+        }));
+        
+        if (redis && cachedLocs.length > 0) {
+          await redis.setex(cacheKey, 900, cachedLocs); // 15 mins cache
+        }
+      } else {
+        cachedLocs = [];
+      }
+    }
 
     // Fetch the explicit preference
     const { data: pref } = await admin
@@ -57,72 +145,32 @@ export class PickupLocationService {
       .eq("courier_config_id", courierConfigId)
       .maybeSingle();
 
-    let defaultLocationId = pref?.pickup_location_id;
-    if (!defaultLocationId && locations.length > 0) {
-      defaultLocationId = locations[0]?.id;
-    }
-
-    return { locations, defaultLocationId };
-  }
-
-  /** Retrieve cached locations or trigger sync if missing */
-  static async get(courierConfigId: string, shopId: string, userId: string): Promise<{ locations: PickupLocation[]; defaultLocationId?: string }> {
-    const admin = createAdminClient();
-    
-    const filterKey = `courier_locations_cache_${courierConfigId}`;
-    
-    // Fetch cache and preferences in parallel
-    const [cacheRes, prefRes] = await Promise.all([
-      admin.from("saved_filters").select("filters").eq("shop_id", shopId).eq("name", filterKey).maybeSingle(),
-      admin.from("courier_pickup_preferences").select("pickup_location_id").eq("shop_id", shopId).eq("courier_config_id", courierConfigId).maybeSingle()
-    ]);
-
-    const cachedLocs = (cacheRes.data?.filters as { locations?: PickupLocation[] })?.locations;
-    let defaultLocationId = prefRes.data?.pickup_location_id;
-
-    if (Array.isArray(cachedLocs) && cachedLocs.length > 0) {
-      if (!defaultLocationId) {
-        defaultLocationId = cachedLocs[0]?.id;
-      }
-      return { locations: cachedLocs, defaultLocationId };
-    }
-
-    // Auto-sync if not cached
-    try {
-      const { data: config } = await admin.from("courier_configs").select("couriers(provider)").eq("id", courierConfigId).single();
-      const pName = (config?.couriers as { provider?: string })?.provider;
-      if (pName) {
-         const p = courierRegistry.get(pName as any);
-         if (p.getCapabilities().supportsPickupLocationSync) {
-           return await this.sync(courierConfigId, shopId, userId);
-         }
-      }
-      return { locations: [], defaultLocationId: undefined };
-    } catch {
-      return { locations: [], defaultLocationId: undefined };
-    }
+    return { locations: cachedLocs, defaultLocationId: pref?.pickup_location_id };
   }
 
   /** Set default pickup location */
   static async setDefault(courierConfigId: string, shopId: string, userId: string, locationId: string): Promise<void> {
     const admin = createAdminClient();
     
-    // Validate that the location exists in cache
-    const filterKey = `courier_locations_cache_${courierConfigId}`;
-    const { data: cached } = await admin.from("saved_filters").select("filters").eq("shop_id", shopId).eq("name", filterKey).maybeSingle();
-    const locations = (cached?.filters as { locations?: PickupLocation[] })?.locations || [];
-    
-    const chosen = locations.find((l) => l.id === locationId);
-    if (!chosen) {
-      throw new Error("Selected pickup location is not available in cache for this courier");
+    // Validate that the location exists in the db for this shop and config
+    const { data: loc } = await admin
+      .from("courier_pickup_locations")
+      .select("id, name")
+      .eq("shop_id", shopId)
+      .eq("courier_config_id", courierConfigId)
+      .eq("id", locationId)
+      .maybeSingle();
+      
+    if (!loc) {
+      throw new Error("Selected pickup location does not exist for this courier configuration.");
     }
 
     await admin.from("courier_pickup_preferences").upsert(
       {
         shop_id: shopId,
         courier_config_id: courierConfigId,
-        pickup_location_id: chosen.id,
-        pickup_location_name: chosen.name,
+        pickup_location_id: loc.id,
+        pickup_location_name: loc.name,
         updated_by: userId,
         updated_at: new Date().toISOString()
       },
@@ -131,7 +179,7 @@ export class PickupLocationService {
   }
 
   /** Get all pickup locations across all configured couriers for a shop */
-  static async getAllForShop(shopId: string, userId: string): Promise<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>> {
+  static async getAllForShop(shopId: string): Promise<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>> {
     const admin = createAdminClient();
     const { data: configs } = await admin
       .from("courier_configs")
@@ -143,7 +191,7 @@ export class PickupLocationService {
     await Promise.all(
       (configs || []).map(async (c: { id: string; connection_status: string; enabled: boolean; couriers: unknown }) => {
         const meta = c.couriers as { provider: string; display_name: string };
-        const data = await this.get(c.id, shopId, userId);
+        const data = await this.get(c.id, shopId);
         result[c.id] = {
           courierName: meta.display_name,
           provider: meta.provider,

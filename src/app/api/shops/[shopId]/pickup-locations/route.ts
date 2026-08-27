@@ -8,9 +8,9 @@ export async function GET(
 ) {
   try {
     const { shopId } = await params;
-    const { user } = await requireShopPermission(shopId, "view_orders");
+    await requireShopPermission(shopId, "view_orders");
 
-    const data = await PickupLocationService.getAllForShop(shopId, user.id);
+    const data = await PickupLocationService.getAllForShop(shopId);
     return NextResponse.json({ data });
   } catch (error) {
     return apiError(error);

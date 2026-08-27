@@ -93,8 +93,7 @@ export class DispatchService {
         // Fetch pickup locations for selected courier
         const locationsData = await PickupLocationService.get(
           selected.id, 
-          dispatch.shop_id, 
-          actorId || dispatch.created_by || "system"
+          dispatch.shop_id
         );
         const availableLocations = locationsData.locations || [];
 
@@ -114,13 +113,11 @@ export class DispatchService {
             return this.fail(dispatch, `The selected pickup location is no longer available for ${courierDisplayName}. Please select another pickup location.`);
           }
         } else {
-          if (availableLocations.length === 0) {
+          if (capabilities.supportsPickupLocationSync && availableLocations.length === 0) {
             lastError = `No pickup location is configured for ${courierDisplayName}.`;
             continue; // Try next courier
           }
-          // For couriers that don't support per-shipment selection, 
-          // we use their implicit configuration (e.g. from the account/adapter)
-          chosenLocation = availableLocations[0];
+          chosenLocation = availableLocations[0] || { id: "unsupported", name: "Default", courierLocationId: "unsupported" };
         }
 
         const { data: secret, error: secretError } = await admin
