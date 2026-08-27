@@ -107,7 +107,7 @@ export async function GET(request: NextRequest) {
     } else if (filter === "attention") {
       query = query
         .is("cancelled_at", null)
-        .or("dispatch_status.eq.failed,customer_phone.is.null,shipping_address.eq.{}");
+        .or("dispatch_status.eq.failed,customer_phone.is.null");
     } else if (filter === "skipped") {
       query = query.eq("is_skipped", true);
     } else if (filter === "on_hold") {
@@ -249,6 +249,7 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
+    console.error("Orders Route Error: ", JSON.stringify(error, null, 2));
     return apiError(error);
   }
 }

@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     } else if (filter === "pending") {
       ordersQuery = ordersQuery.is("cancelled_at", null).eq("financial_status", "PENDING");
     } else if (filter === "attention") {
-      ordersQuery = ordersQuery.is("cancelled_at", null).or("dispatch_status.eq.failed,customer_phone.is.null,shipping_address.eq.{}");
+      ordersQuery = ordersQuery.is("cancelled_at", null).or("dispatch_status.eq.failed,customer_phone.is.null");
     } else if (filter === "skipped") {
       ordersQuery = ordersQuery.eq("is_skipped", true);
     } else if (filter === "on_hold") {
@@ -111,6 +111,7 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
+    console.error("Bootstrap Route Error: ", JSON.stringify(error, null, 2));
     return apiError(error);
   }
 }

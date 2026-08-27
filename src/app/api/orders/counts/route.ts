@@ -51,6 +51,7 @@ export async function GET(request: NextRequest) {
       }
     });
   } catch (error) {
+    console.error("Counts Route Error: ", JSON.stringify(error, null, 2));
     return apiError(error);
   }
 }

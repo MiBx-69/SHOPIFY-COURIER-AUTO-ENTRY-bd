@@ -82,3 +82,6 @@ BEGIN
   WHERE shop_id = p_shop_id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION get_order_counts(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_order_counts(uuid) TO service_role;
