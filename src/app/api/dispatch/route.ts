@@ -3,6 +3,7 @@ import { apiError, currentUser, requireShopPermission } from "@/lib/api/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchRequestSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
+import { resolveCourierConfigId } from "@/services/dispatch/courier-routing";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { invalidateOrderCaches } from "@/lib/redis";
 
@@ -12,19 +13,35 @@ export async function POST(request: NextRequest) {
     await enforceRateLimit(`dispatch:${user.id}`, 20);
     const body = dispatchRequestSchema.parse(await request.json());
 
-    // V1 is manual-courier only. Never silently choose a priority/first courier.
-    if (!body.courierConfigId) {
-      return NextResponse.json({ success: false, error: "Select a courier before dispatching." }, { status: 400 });
-    }
-
     const admin = createAdminClient();
     const { data: order } = await admin
       .from("orders")
-      .select("shop_id")
+      .select("shop_id,shipping_method,shipping_method_code")
       .eq("id", body.orderId)
       .single();
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
     await requireShopPermission(order.shop_id, "dispatch_orders");
+
+    const { data: shop } = await admin
+      .from("shops")
+      .select("automatic_courier")
+      .eq("id", order.shop_id)
+      .single();
+
+    let courierConfigId = body.courierConfigId;
+    if (!courierConfigId && shop?.automatic_courier) {
+      courierConfigId = await resolveCourierConfigId(
+        admin,
+        order.shop_id,
+        order.shipping_method,
+        order.shipping_method_code,
+        true
+      );
+    }
+
+    if (!courierConfigId) {
+      return NextResponse.json({ success: false, error: "Select a courier before dispatching, or enable Automatic Courier Selection." }, { status: 400 });
+    }
 
     const { data: dispatch, error } = await supabase.rpc("claim_dispatch", {
       p_order_id: body.orderId,
@@ -45,7 +62,7 @@ export async function POST(request: NextRequest) {
 
     const result = await new DispatchService().execute(
       dispatch.id,
-      body.courierConfigId,
+      courierConfigId,
       body.pickupLocationId,
       user.id
     );
@@ -63,14 +80,14 @@ export async function POST(request: NextRequest) {
     }
 
     try {
-      const { data: shop } = await admin
+      const { data: auditShop } = await admin
         .from("shops")
         .select("organization_id")
         .eq("id", order.shop_id)
         .maybeSingle();
-      if (shop) {
+      if (auditShop) {
         await admin.from("audit_logs").insert({
-          organization_id: shop.organization_id,
+          organization_id: auditShop.organization_id,
           shop_id: order.shop_id,
           actor_id: user.id,
           action: "dispatch.single",
@@ -79,7 +96,10 @@ export async function POST(request: NextRequest) {
           metadata: {
             status: result.status,
             tracking_id: result.trackingId,
-            courier_name: result.courierName
+            courier_name: result.courierName,
+            shipping_method: order.shipping_method,
+            shipping_method_code: order.shipping_method_code,
+            courier_config_id: courierConfigId
           }
         });
       }
