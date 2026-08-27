@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS public.courier_pickup_locations (
 
 -- RLS: tenant isolation — a user can only see locations for shops they belong to
 ALTER TABLE public.courier_pickup_locations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Tenant isolation" ON public.courier_pickup_locations;
 CREATE POLICY "Tenant isolation" ON public.courier_pickup_locations
   FOR ALL TO authenticated
   USING (private.has_shop_access(shop_id));
