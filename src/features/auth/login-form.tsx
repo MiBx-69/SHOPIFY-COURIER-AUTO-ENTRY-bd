@@ -331,18 +331,20 @@ export function LoginForm() {
         </button>
       </form>
 
-      {/* WhatsApp Support Notice */}
-      <div className="border-t border-slate-100 pt-3 text-center">
-        <p className="text-[11px] text-slate-400">
-          Need access or assistance?{" "}
-          <a
-            href="https://wa.me/8801605956421"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-emerald-600 hover:text-emerald-700"
+      {/* Invitation Notice */}
+      <div className="border-t border-slate-100 pt-4 text-center space-y-2">
+        <p className="text-[11px] text-slate-500 font-medium">
+          This is a private, invite-only application.
+        </p>
+        <p className="text-xs text-slate-700">
+          Have an invitation?{" "}
+          <button
+            type="button"
+            onClick={() => router.push("/accept-invitation")}
+            className="font-semibold text-blue-600 hover:text-blue-700 underline underline-offset-2 cursor-pointer"
           >
-            Contact Developer on WhatsApp →
-          </a>
+            Accept Invitation
+          </button>
         </p>
       </div>
     </div>

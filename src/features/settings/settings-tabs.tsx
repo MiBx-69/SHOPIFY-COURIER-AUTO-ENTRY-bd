@@ -18,17 +18,23 @@ const TABS = [
 
 interface Props {
   activeTab: string;
+  currentUserRole?: string;
   children: React.ReactNode;
 }
 
-export function SettingsTabs({ activeTab, children }: Props) {
+export function SettingsTabs({ activeTab, currentUserRole, children }: Props) {
   const searchParams = useSearchParams();
+
+  const tabs = [...TABS];
+  if (currentUserRole === 'developer') {
+    tabs.push({ id: "developer", label: "Developer", icon: Settings2 }); // Reusing Settings2 or similar
+  }
 
   return (
     <div className="flex flex-col gap-5 md:flex-row md:gap-7 w-full min-w-0">
       {/* Sidebar nav — desktop */}
       <nav className="hidden md:flex flex-col gap-0.5 w-44 shrink-0">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon: Icon }) => (
           <Link
             key={id}
             href={`/settings?tab=${id}`}
@@ -48,7 +54,7 @@ export function SettingsTabs({ activeTab, children }: Props) {
       {/* Mobile tabs — horizontal scroll */}
       <div className="md:hidden -mx-4 px-4 overflow-x-auto no-scrollbar">
         <div className="flex gap-1 pb-1 w-max">
-          {TABS.map(({ id, label, icon: Icon }) => (
+          {tabs.map(({ id, label, icon: Icon }) => (
             <Link
               key={id}
               href={`/settings?tab=${id}`}

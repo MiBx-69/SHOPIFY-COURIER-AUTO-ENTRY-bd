@@ -13,9 +13,19 @@ interface Member {
   created_at: string;
 }
 
+interface Invitation {
+  id: string;
+  email: string;
+  role: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
+}
+
 interface Props {
-  shopId: string;
+  organizationId: string;
   members: Member[];
+  invitations: Invitation[];
   currentUserId: string;
   currentUserRole: string;
 }
@@ -34,13 +44,14 @@ function RoleIcon({ role }: { role: string }) {
   return <User size={12} className="text-slate-400" />;
 }
 
-export function TeamSettings({ shopId, members, currentUserId, currentUserRole }: Props) {
+export function TeamSettings({ organizationId, members, invitations: initialInvitations, currentUserId, currentUserRole }: Props) {
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"manager" | "dispatcher" | "viewer">("dispatcher");
+  const [inviteRole, setInviteRole] = useState<"manager" | "dispatcher" | "viewer" | "admin" | "staff">("staff");
   const [inviteStatus, setInviteStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [inviteError, setInviteError] = useState("");
+  const [invitations, setInvitations] = useState(initialInvitations);
 
-  const canManage = ["owner", "admin", "manager"].includes(currentUserRole);
+  const canManage = ["owner", "admin", "developer"].includes(currentUserRole);
 
   const handleInvite = useCallback(async () => {
     if (!inviteEmail.includes("@")) {
@@ -50,21 +61,58 @@ export function TeamSettings({ shopId, members, currentUserId, currentUserRole }
     setInviteStatus("loading");
     setInviteError("");
     try {
-      const res = await fetch(`/api/team?shopId=${shopId}`, {
+      const res = await fetch(`/api/auth/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole, organization_id: organizationId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Invitation failed");
       setInviteStatus("success");
       setInviteEmail("");
+      
+      // Optimistically add to list
+      setInvitations([{
+        id: data.invitation_id || Math.random().toString(),
+        email: inviteEmail,
+        role: inviteRole,
+        status: "pending",
+        created_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString()
+      }, ...invitations]);
+
       setTimeout(() => setInviteStatus("idle"), 4000);
     } catch (err) {
       setInviteStatus("error");
       setInviteError(err instanceof Error ? err.message : "Failed to send invitation.");
     }
-  }, [inviteEmail, inviteRole, shopId]);
+  }, [inviteEmail, inviteRole, organizationId, invitations]);
+
+  const handleRevoke = async (invitationId: string) => {
+    try {
+      await fetch(`/api/auth/invite/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invitation_id: invitationId }),
+      });
+      setInvitations(invitations.map(inv => inv.id === invitationId ? { ...inv, status: 'revoked' } : inv));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleResend = async (invitationId: string) => {
+    try {
+      await fetch(`/api/auth/invite/resend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invitation_id: invitationId }),
+      });
+      alert("Invitation resent!");
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -109,6 +157,33 @@ export function TeamSettings({ shopId, members, currentUserId, currentUserRole }
           {members.length === 0 && (
             <p className="text-xs text-slate-400 py-4 text-center">No team members found.</p>
           )}
+
+          {/* Pending Invitations */}
+          {invitations.length > 0 && (
+            <div className="pt-4 mt-4 border-t border-slate-100">
+              <h4 className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">Invitations</h4>
+              <div className="space-y-2">
+                {invitations.map((inv) => (
+                  <div key={inv.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-slate-50 border border-slate-100">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{inv.email}</p>
+                      <p className="text-[11px] text-slate-500 capitalize">{inv.role} · {inv.status}</p>
+                    </div>
+                    {inv.status === 'pending' && canManage && (
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => handleResend(inv.id)} className="text-[11px] font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
+                          Resend
+                        </button>
+                        <button onClick={() => handleRevoke(inv.id)} className="text-[11px] font-medium text-red-600 hover:text-red-700 cursor-pointer">
+                          Revoke
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -130,12 +205,11 @@ export function TeamSettings({ shopId, members, currentUserId, currentUserRole }
             <div className="relative">
               <select
                 value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as typeof inviteRole)}
+                onChange={(e) => setInviteRole(e.target.value as any)}
                 className="w-full appearance-none text-sm rounded-lg border border-slate-300 bg-white px-3 py-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-slate-900"
               >
-                {currentUserRole === "owner" && <option value="admin">Admin — full access except ownership</option>}
-                <option value="manager">Manager — orders, dispatch, couriers, settings</option>
-                <option value="dispatcher">Dispatcher — orders and dispatch only</option>
+                {["owner", "developer"].includes(currentUserRole) && <option value="admin">Admin — full access except ownership</option>}
+                <option value="staff">Staff — standard access</option>
                 <option value="viewer">Viewer — read-only access</option>
               </select>
               <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />

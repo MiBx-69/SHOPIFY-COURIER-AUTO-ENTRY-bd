@@ -13,6 +13,7 @@ import { TeamSettings } from "@/features/settings/team-settings";
 import { TelegramSettings } from "@/features/settings/telegram-settings";
 import { SystemHealth } from "@/features/settings/system-health";
 import { SettingsTabs } from "@/features/settings/settings-tabs";
+import { DeveloperConsole } from "@/features/settings/developer-console";
 
 export const metadata = { title: "Settings | MiBx-Dispatch" };
 
@@ -31,7 +32,7 @@ export default async function SettingsPage({
   // Fetch shops this user belongs to (RLS on shops respects membership)
   const { data: shops } = await supabase
     .from("shops")
-    .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier")
+    .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,organization_id")
     .limit(1);
 
   const shop = shops?.[0] ?? null;
@@ -98,11 +99,17 @@ export default async function SettingsPage({
     profiles: any; // Supabase returns array or single object depending on relation
   }
   const members: Array<{ id: string; user_id: string; role: string; email?: string; full_name?: string; created_at: string }> = [];
+  const invitations: Array<{ id: string; email: string; role: string; status: string; created_at: string; expires_at: string }> = [];
+  
   if (shop) {
+    const orgId = shop.organization_id;
+    
+    // 1. Fetch memberships
     const { data: orgMemberships } = await admin
       .from("memberships")
       .select("id,user_id,role,created_at,profiles(full_name)")
-      .eq("organization_id", (await admin.from("shops").select("organization_id").eq("id", shop.id).single()).data?.organization_id ?? "");
+      .eq("organization_id", orgId);
+      
     if (orgMemberships) {
       // Fetch emails via admin auth
       for (const m of orgMemberships as MemberRow[]) {
@@ -117,6 +124,18 @@ export default async function SettingsPage({
           created_at: m.created_at,
         });
       }
+    }
+
+    // 2. Fetch pending/revoked invitations
+    const { data: orgInvitations } = await supabase
+      .from("organization_invitations")
+      .select("id, email, role, status, created_at, expires_at")
+      .eq("organization_id", orgId)
+      .neq("status", "accepted")
+      .order("created_at", { ascending: false });
+      
+    if (orgInvitations) {
+      invitations.push(...orgInvitations);
     }
   }
 
@@ -144,7 +163,7 @@ export default async function SettingsPage({
         <h1 className="text-2xl font-bold tracking-tight text-slate-900">Settings</h1>
       </header>
 
-      <SettingsTabs activeTab={activeTab}>
+      <SettingsTabs activeTab={activeTab} currentUserRole={currentUserRole}>
         {/* ── Shopify ─────────────────────────────────────────────────── */}
         {activeTab === "shopify" && (
           <section>
@@ -235,8 +254,9 @@ export default async function SettingsPage({
               <p className="text-sm text-slate-500">Manage who has access to your store workspace.</p>
             </div>
             <TeamSettings
-              shopId={shop.id}
+              organizationId={shop.organization_id}
               members={members}
+              invitations={invitations}
               currentUserId={user.id}
               currentUserRole={currentUserRole}
             />
@@ -266,6 +286,17 @@ export default async function SettingsPage({
             <SystemHealth />
           </section>
         )}
+        {/* ── Developer ───────────────────────────────────────────────── */}
+        {activeTab === "developer" && currentUserRole === "developer" && (
+          <section>
+            <div className="mb-4">
+              <h2 className="text-base font-bold text-slate-900">Developer Console</h2>
+              <p className="text-sm text-slate-500">Manage all tenant organizations and perform system administrative tasks.</p>
+            </div>
+            <DeveloperConsole />
+          </section>
+        )}
+
       </SettingsTabs>
     </AppShell>
   );
