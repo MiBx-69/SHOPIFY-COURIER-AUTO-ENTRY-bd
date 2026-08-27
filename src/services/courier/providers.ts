@@ -134,12 +134,12 @@ export class RedxProvider implements CourierProvider {
     this.validateConfig(c);
     const token = redxToken(c.apiToken);
     
-    const { response, data } = await courierFetch(`${this.baseUrl(c)}/stores`, {
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/pickup/stores`, {
       headers: { "API-ACCESS-TOKEN": token }
     });
 
-    const d = data as { store_list?: Array<Record<string, unknown>> };
-    const rawList = Array.isArray(d?.store_list) ? d.store_list : [];
+    const d = data as { pickup_stores?: Array<Record<string, unknown>> };
+    const rawList = Array.isArray(d?.pickup_stores) ? d.pickup_stores : [];
 
     if (response.ok && rawList.length > 0) {
       return rawList.map((s) => ({
@@ -148,8 +148,8 @@ export class RedxProvider implements CourierProvider {
         name: String(s.name || `Store #${s.id}`),
         address: String(s.address || ""),
         phone: s.phone ? String(s.phone) : undefined,
-        city: s.city ? String(s.city) : undefined,
-        area: s.area ? String(s.area) : undefined,
+        city: undefined,
+        area: s.area_name ? String(s.area_name) : undefined,
         isActive: true
       }));
     }

@@ -325,7 +325,7 @@ export function OrderList({
       const res = await fetch(`/api/shops/${shopId}/pickup-locations`);
       if (!res.ok) throw new Error("Failed");
       const body = await res.json();
-      return body.data as Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>;
+      return body.data as Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string; supported?: boolean }>;
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -1759,10 +1759,16 @@ export function OrderList({
                       <MapPin size={12} className="text-slate-500" />
                       <span>Pickup Warehouse / Branch</span>
                     </label>
-                    <span className="text-[10px] text-slate-400">{locations.length} available</span>
+                    <span className="text-[10px] text-slate-400">
+                      {locationsData?.supported === false ? "Managed by Courier" : `${locations.length} available`}
+                    </span>
                   </div>
 
-                  {locations.length > 0 ? (
+                  {locationsData?.supported === false ? (
+                    <div className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 flex items-center text-xs text-slate-500">
+                      Managed by your {locationsData.courierName} merchant account
+                    </div>
+                  ) : locations.length > 0 ? (
                     <select
                       value={singleDispatchOrder ? singleDispatchPickupLocationId : bulkPickupLocationId}
                       onChange={(e) => {
@@ -1800,7 +1806,10 @@ export function OrderList({
                 disabled={batchProcessing || (() => {
                   const activeCourierId = singleDispatchOrder ? singleDispatchCourierId : bulkCourierId;
                   const locs = courierPickupMap[activeCourierId]?.locations || [];
+                  const supported = courierPickupMap[activeCourierId]?.supported ?? true;
                   const selectedLoc = singleDispatchOrder ? singleDispatchPickupLocationId : bulkPickupLocationId;
+                  
+                  if (!supported) return false; // Doesn't need a location
                   return locs.length > 0 && !selectedLoc;
                 })()}
                 className="flex-1 h-9 text-xs bg-slate-900 hover:bg-slate-800 text-white font-bold disabled:opacity-50"

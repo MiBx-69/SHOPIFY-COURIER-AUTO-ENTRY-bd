@@ -195,17 +195,23 @@ export class PickupLocationService {
       .select("id, connection_status, enabled, couriers(provider, display_name)")
       .eq("shop_id", shopId);
 
-    const result: Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }> = {};
+    const result: Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string; supported: boolean }> = {};
 
     await Promise.all(
       (configs || []).map(async (c: { id: string; connection_status: string; enabled: boolean; couriers: unknown }) => {
         const meta = c.couriers as { provider: string; display_name: string };
         const data = await this.get(c.id, shopId);
+        
+        const { courierRegistry } = await import("@/services/courier/registry");
+        const provider = courierRegistry.get(meta.provider as any);
+        const capabilities = provider.getCapabilities();
+
         result[c.id] = {
           courierName: meta.display_name,
           provider: meta.provider,
           locations: data.locations,
-          defaultLocationId: data.defaultLocationId
+          defaultLocationId: data.defaultLocationId,
+          supported: capabilities.supportsPickupLocations
         };
       })
     );
