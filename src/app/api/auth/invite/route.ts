@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { inviteSchema } from "@/lib/validation/schemas";
 
 export async function POST(request: Request) {
   try {
@@ -12,13 +13,14 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { email, role, name, phone, company_name, organization_id } = body;
-
-    if (!email || !organization_id || !role) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    const parsed = inviteSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request body", details: parsed.error.format() }, { status: 400 });
     }
 
-    const isDeveloper = user.user_metadata?.app_role === 'developer';
+    const { email, role, name, phone, company_name, organization_id } = parsed.data;
+
+    const isDeveloper = user.app_metadata?.app_role === 'developer';
 
     // 1. Authorization Check (if not developer, must be admin/owner of the org)
     if (!isDeveloper) {
@@ -62,10 +64,9 @@ export async function POST(request: Request) {
 
     // 3. Send Supabase Auth Invitation using Admin Client
     const adminSupabase = createAdminClient();
-    const { error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(email, {
+    const { data: inviteData, error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(email, {
       data: {
-        organization_id,
-        app_role: role
+        organization_id
       },
       redirectTo: `${new URL(request.url).origin}/auth/callback`
     });
@@ -75,11 +76,17 @@ export async function POST(request: Request) {
       await adminSupabase.from('organization_invitations').delete().eq('id', invitation.id);
       return NextResponse.json({ error: "Failed to send invitation email via Supabase" }, { status: 500 });
     }
+    
+    if (inviteData?.user) {
+      await adminSupabase.auth.admin.updateUserById(inviteData.user.id, {
+        app_metadata: { app_role: role }
+      });
+    }
 
     // 4. Audit Log
     await supabase.from('audit_logs').insert({
       actor_id: user.id,
-      actor_role: user.user_metadata?.app_role || 'staff',
+      actor_role: user.app_metadata?.app_role || 'staff',
       action: 'INVITATION_SENT',
       target_organization_id: organization_id,
       metadata: { email, role }

@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isDeveloper = user.user_metadata?.app_role === 'developer';
+    const isDeveloper = user.app_metadata?.app_role === 'developer';
     if (!isDeveloper) {
       return NextResponse.json({ error: "Forbidden: Developer access required" }, { status: 403 });
     }
@@ -94,7 +94,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const isDeveloper = user.user_metadata?.app_role === 'developer';
+    const isDeveloper = user.app_metadata?.app_role === 'developer';
     if (!isDeveloper) {
       return NextResponse.json({ error: "Forbidden: Developer access required" }, { status: 403 });
     }

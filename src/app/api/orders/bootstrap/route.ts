@@ -7,7 +7,7 @@ export async function GET(request: NextRequest) {
   const startTime = Date.now();
   try {
     const { user, supabase } = await currentUser();
-    enforceRateLimit(`bootstrap:${user.id}`, 60);
+    await enforceRateLimit(`bootstrap:${user.id}`, 60);
 
     const p = request.nextUrl.searchParams;
     const shopId = p.get("shopId");

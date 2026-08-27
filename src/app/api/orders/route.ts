@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
   const startTime = Date.now();
   try {
     const { user, supabase } = await currentUser();
-    enforceRateLimit(`orders:${user.id}`, 90);
+    await enforceRateLimit(`orders:${user.id}`, 90);
     const p = request.nextUrl.searchParams;
     const shopId = p.get("shopId");
     const organizationId = p.get("organizationId") || "default"; // Ideally fetched from user session, fallback to default

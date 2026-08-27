@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiError, currentUser } from "@/lib/api/auth";
+import { apiError, currentUser, requireShopPermission } from "@/lib/api/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchRequestSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
@@ -8,8 +8,14 @@ import { enforceRateLimit } from "@/lib/security/rate-limit";
 export async function POST(request: NextRequest) {
   try {
     const { user, supabase } = await currentUser();
-    enforceRateLimit(`dispatch:${user.id}`, 20);
+    await enforceRateLimit(`dispatch:${user.id}`, 20);
     const body = dispatchRequestSchema.parse(await request.json());
+
+    // API-level authorization check (defense-in-depth)
+    const admin = createAdminClient();
+    const { data: order } = await admin.from("orders").select("shop_id").eq("id", body.orderId).single();
+    if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+    await requireShopPermission(order.shop_id, "dispatch_orders");
 
     const { data: dispatch, error } = await supabase.rpc("claim_dispatch", {
       p_order_id: body.orderId,

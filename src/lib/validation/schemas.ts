@@ -22,7 +22,11 @@ export const courierConfigSchema = z.object({
 
 export const inviteSchema = z.object({
   email: z.string().email(),
-  role: z.enum(["admin", "manager", "dispatcher", "viewer"])
+  role: z.enum(["admin", "manager", "dispatcher", "viewer"]),
+  name: z.string().optional(),
+  phone: z.string().optional(),
+  company_name: z.string().optional(),
+  organization_id: z.string().uuid()
 });
 
 export const paginationSchema = z.object({

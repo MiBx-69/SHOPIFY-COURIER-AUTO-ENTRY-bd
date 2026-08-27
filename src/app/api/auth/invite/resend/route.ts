@@ -33,7 +33,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Only pending invitations can be resent" }, { status: 400 });
     }
 
-    const isDeveloper = user.user_metadata?.app_role === 'developer';
+    const isDeveloper = user.app_metadata?.app_role === 'developer';
 
     // 2. Authorization Check (if not developer, must be admin/owner of the org)
     if (!isDeveloper) {
@@ -51,16 +51,21 @@ export async function POST(request: Request) {
 
     // 3. Send Supabase Auth Invitation using Admin Client
     const adminSupabase = createAdminClient();
-    const { error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(invitation.email, {
+    const { data: inviteData, error: inviteError } = await adminSupabase.auth.admin.inviteUserByEmail(invitation.email, {
       data: {
-        organization_id: invitation.organization_id,
-        app_role: invitation.role
+        organization_id: invitation.organization_id
       },
       redirectTo: `${new URL(request.url).origin}/auth/callback`
     });
 
     if (inviteError) {
-      return NextResponse.json({ error: "Failed to resend invitation email via Supabase" }, { status: 500 });
+      return NextResponse.json({ error: "Failed to resend invitation email" }, { status: 500 });
+    }
+
+    if (inviteData?.user) {
+      await adminSupabase.auth.admin.updateUserById(inviteData.user.id, {
+        app_metadata: { app_role: invitation.role }
+      });
     }
 
     // 4. Update the invitation expiration
@@ -72,7 +77,7 @@ export async function POST(request: Request) {
     // 5. Audit Log
     await supabase.from('audit_logs').insert({
       actor_id: user.id,
-      actor_role: user.user_metadata?.app_role || 'staff',
+      actor_role: user.app_metadata?.app_role || 'staff',
       action: 'INVITATION_RESENT',
       target_organization_id: invitation.organization_id,
       metadata: { invitation_id, email: invitation.email }

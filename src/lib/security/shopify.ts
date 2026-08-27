@@ -11,7 +11,9 @@ export function verifyShopifyHmac(params: URLSearchParams) {
   if (!supplied) return false;
   const message = [...params.entries()].filter(([key]) => key !== "hmac" && key !== "signature").sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${k}=${v}`).join("&");
   const digest = crypto.createHmac("sha256", requireShopifyEnv().SHOPIFY_CLIENT_SECRET).update(message).digest("hex");
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(supplied));
+  const digestBuf = Buffer.from(digest);
+  const suppliedBuf = Buffer.from(supplied);
+  return digestBuf.length === suppliedBuf.length && crypto.timingSafeEqual(digestBuf, suppliedBuf);
 }
 export function verifyWebhook(rawBody: string, hmac: string | null) {
   if (!hmac) return false;

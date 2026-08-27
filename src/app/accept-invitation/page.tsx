@@ -103,9 +103,9 @@ export default function AcceptInvitationPage() {
       <div className="w-full max-w-md space-y-6 rounded-3xl bg-white p-8 shadow-xl ring-1 ring-slate-200">
         <div className="text-center">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">Welcome to MiBx-Dispatch</h1>
-          {user?.user_metadata?.app_role && (
-            <p className="mt-2 text-sm text-slate-500">
-              Role: <span className="font-semibold text-slate-700 uppercase">{user.user_metadata.app_role}</span>
+          {user?.app_metadata?.app_role && (
+            <p className="mt-1">
+              Role: <span className="font-semibold text-slate-700 uppercase">{user.app_metadata.app_role}</span>
             </p>
           )}
           <p className="mt-1 text-sm text-slate-500">

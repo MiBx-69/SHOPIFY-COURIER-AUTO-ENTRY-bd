@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Only pending invitations can be revoked" }, { status: 400 });
     }
 
-    const isDeveloper = user.user_metadata?.app_role === 'developer';
+    const isDeveloper = user.app_metadata?.app_role === 'developer';
 
     // 2. Authorization Check (if not developer, must be admin/owner of the org)
     if (!isDeveloper) {
@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     // 4. Audit Log
     await supabase.from('audit_logs').insert({
       actor_id: user.id,
-      actor_role: user.user_metadata?.app_role || 'staff',
+      actor_role: user.app_metadata?.app_role || 'staff',
       action: 'INVITATION_REVOKED',
       target_organization_id: invitation.organization_id,
       metadata: { invitation_id, email: invitation.email }

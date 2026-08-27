@@ -112,7 +112,9 @@ lerna-debug.log*
 
 .next/
 out/
+build/
 .vercel/
+*.tsbuildinfo
 
 # Next.js build/debug output
 next-env.d.ts
