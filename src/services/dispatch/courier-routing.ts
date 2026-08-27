@@ -27,10 +27,11 @@ export async function resolveCourierConfigId(
   shippingMethod: string | null | undefined,
   shippingMethodCode: string | null | undefined,
   automaticCourier: boolean,
-  explicitConfigId?: string
+  explicitConfigId?: string,
+  forceRouting = false
 ) {
-  if (explicitConfigId) return explicitConfigId;
-  if (!automaticCourier) return undefined;
+  if (explicitConfigId && !forceRouting) return explicitConfigId;
+  if (!automaticCourier) return explicitConfigId;
 
   const { data: configs, error: configError } = await admin
     .from("courier_configs")
