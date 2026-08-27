@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchRequestSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
+import { invalidateOrderCaches } from "@/lib/redis";
 
 export async function POST(request: NextRequest) {
   try {
@@ -11,9 +12,17 @@ export async function POST(request: NextRequest) {
     await enforceRateLimit(`dispatch:${user.id}`, 20);
     const body = dispatchRequestSchema.parse(await request.json());
 
-    // API-level authorization check (defense-in-depth)
+    // V1 is manual-courier only. Never silently choose a priority/first courier.
+    if (!body.courierConfigId) {
+      return NextResponse.json({ success: false, error: "Select a courier before dispatching." }, { status: 400 });
+    }
+
     const admin = createAdminClient();
-    const { data: order } = await admin.from("orders").select("shop_id").eq("id", body.orderId).single();
+    const { data: order } = await admin
+      .from("orders")
+      .select("shop_id")
+      .eq("id", body.orderId)
+      .single();
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
     await requireShopPermission(order.shop_id, "dispatch_orders");
 
@@ -25,9 +34,8 @@ export async function POST(request: NextRequest) {
     if (error || !dispatch) {
       const errMsg = error?.message || "Failed to claim order for dispatch";
       console.warn(`[DISPATCH CLAIM REJECTED] order_id=${body.orderId} user_id=${user.id} error="${errMsg}"`);
-
       const isConcurrent = errMsg.toLowerCase().includes("already in progress");
-      return NextResponse.json({ 
+      return NextResponse.json({
         success: false,
         error: isConcurrent ? "Dispatch is already in progress for this order." : errMsg
       }, { status: isConcurrent ? 409 : 400 });
@@ -42,6 +50,9 @@ export async function POST(request: NextRequest) {
       user.id
     );
 
+    // Invalidate before responding so the next counts/list request cannot read stale state.
+    await invalidateOrderCaches([order.shop_id]);
+
     if (!result.success) {
       return NextResponse.json({
         success: false,
@@ -51,35 +62,30 @@ export async function POST(request: NextRequest) {
       }, { status: result.status === "unknown" ? 502 : 422 });
     }
 
-    (async () => {
-      try {
-        const admin = createAdminClient();
-        const { data: order } = await admin.from("orders").select("shop_id").eq("id", body.orderId).maybeSingle();
-        if (order) {
-          const { data: shop } = await admin.from("shops").select("organization_id").eq("id", order.shop_id).maybeSingle();
-          
-          // Invalidate cache since order state changed
-          const { invalidateCountsCache } = await import("@/lib/redis");
-          await invalidateCountsCache([order.shop_id]);
-          
-          if (shop) {
-            await admin.from("audit_logs").insert({
-              organization_id: shop.organization_id,
-              shop_id: order.shop_id,
-              actor_id: user.id,
-              action: "dispatch.single",
-              entity_type: "order",
-              entity_id: body.orderId,
-              metadata: {
-                status: result.status,
-                tracking_id: result.trackingId,
-                courier_name: result.courierName
-              }
-            });
+    try {
+      const { data: shop } = await admin
+        .from("shops")
+        .select("organization_id")
+        .eq("id", order.shop_id)
+        .maybeSingle();
+      if (shop) {
+        await admin.from("audit_logs").insert({
+          organization_id: shop.organization_id,
+          shop_id: order.shop_id,
+          actor_id: user.id,
+          action: "dispatch.single",
+          entity_type: "order",
+          entity_id: body.orderId,
+          metadata: {
+            status: result.status,
+            tracking_id: result.trackingId,
+            courier_name: result.courierName
           }
-        }
-      } catch { /* ignored */ }
-    })();
+        });
+      }
+    } catch (auditError) {
+      console.warn("Failed to write dispatch audit log:", auditError);
+    }
 
     return NextResponse.json({
       success: true,
