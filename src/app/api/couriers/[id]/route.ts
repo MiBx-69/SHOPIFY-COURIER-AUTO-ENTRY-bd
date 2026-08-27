@@ -126,6 +126,13 @@ export async function DELETE(
     const courierMeta = config.couriers as unknown as { provider: string; display_name: string };
     const { user } = await requireShopPermission(shopId, "manage_couriers");
 
+    // Null-out FK in dispatches so the row can be deleted without violating the constraint.
+    // Historical dispatch records are preserved — they just lose the courier link.
+    await admin
+      .from("dispatches")
+      .update({ courier_config_id: null })
+      .eq("courier_config_id", id);
+
     // Secrets are cascade-deleted by the FK constraint
     const { error } = await admin.from("courier_configs").delete().eq("id", id);
     if (error) throw error;

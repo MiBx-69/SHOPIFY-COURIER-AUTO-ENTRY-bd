@@ -103,6 +103,24 @@ export class PickupLocationService {
     let redisMs = 0;
     let dbMs = 0;
 
+    // ── Early exit: check if this provider supports pickup locations at all ──
+    const { data: configMeta } = await admin
+      .from("courier_configs")
+      .select("couriers(provider)")
+      .eq("id", courierConfigId)
+      .eq("shop_id", shopId)
+      .single();
+    
+    if (configMeta) {
+      const providerName = (configMeta.couriers as unknown as { provider: string } | null)?.provider;
+      if (providerName) {
+        const caps = courierRegistry.get(providerName as "redx" | "pathao" | "steadfast").getCapabilities();
+        if (!caps.supportsPickupLocations) {
+          return { locations: [], defaultLocationId: undefined, redisMs: 0, dbMs: 0 };
+        }
+      }
+    }
+
     // Check Redis cache first
     let cachedLocs: PickupLocation[] | null = null;
     const cacheKey = generateCacheKey(shopId, "pickup_locations", { courierConfigId });
@@ -188,7 +206,7 @@ export class PickupLocationService {
   }
 
   /** Get all pickup locations across all configured couriers for a shop */
-  static async getAllForShop(shopId: string): Promise<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>> {
+  static async getAllForShop(shopId: string): Promise<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string; supported: boolean }>> {
     const admin = createAdminClient();
     const { data: configs } = await admin
       .from("courier_configs")
@@ -200,18 +218,28 @@ export class PickupLocationService {
     await Promise.all(
       (configs || []).map(async (c: { id: string; connection_status: string; enabled: boolean; couriers: unknown }) => {
         const meta = c.couriers as { provider: string; display_name: string };
-        const data = await this.get(c.id, shopId);
-        
-        const { courierRegistry } = await import("@/services/courier/registry");
-        const provider = courierRegistry.get(meta.provider as any);
+        const provider = courierRegistry.get(meta.provider as "redx" | "pathao" | "steadfast");
         const capabilities = provider.getCapabilities();
 
+        if (!capabilities.supportsPickupLocations) {
+          // Skip all DB queries for couriers that don't support pickup locations
+          result[c.id] = {
+            courierName: meta.display_name,
+            provider: meta.provider,
+            locations: [],
+            defaultLocationId: undefined,
+            supported: false
+          };
+          return;
+        }
+
+        const data = await this.get(c.id, shopId);
         result[c.id] = {
           courierName: meta.display_name,
           provider: meta.provider,
           locations: data.locations,
           defaultLocationId: data.defaultLocationId,
-          supported: capabilities.supportsPickupLocations
+          supported: true
         };
       })
     );
