@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser, apiError } from "@/lib/api/auth";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
-import { redis, generateCacheKey } from "@/lib/redis";
+import { getCache, setCache, generateCacheKey } from "@/lib/cache";
 
 // Helper to compute date ranges
 function getDateRange(preset: string, startParam?: string | null, endParam?: string | null) {
@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
     enforceRateLimit(`orders:${user.id}`, 90);
     const p = request.nextUrl.searchParams;
     const shopId = p.get("shopId");
+    const organizationId = p.get("organizationId") || "default"; // Ideally fetched from user session, fallback to default
     if (!shopId) return NextResponse.json({ error: "shopId is required" }, { status: 400 });
 
     const page = Math.max(0, Number(p.get("page") || 0));
@@ -61,49 +62,24 @@ export async function GET(request: NextRequest) {
     const maxAmount = p.get("maxAmount") ? Number(p.get("maxAmount")) * 100 : null;
 
     // Cache-Aside Logic
-    const cacheKey = generateCacheKey(shopId, "orders:list", {
+    const cacheKey = generateCacheKey(organizationId, shopId, "orders:list", {
       page, size, filter, search, datePreset, startDate, endDate, dateField, payment, fulfillment, courier, minAmount, maxAmount
     });
 
-    if (redis) {
-      try {
-        const cached = await redis.get(cacheKey);
-        if (cached) {
-          return NextResponse.json(cached, {
-            headers: {
-              "X-Cache": "HIT",
-              "X-Response-Time": `${Date.now() - startTime}ms`
-            }
-          });
+    const cached = await getCache(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached, {
+        headers: {
+          "X-Cache": "HIT",
+          "X-Response-Time": `${Date.now() - startTime}ms`
         }
-      } catch (err) {
-        console.warn("Redis get failed:", err);
-      }
+      });
     }
-
-    // Fetch active skipped orders for this shop
-    const { data: skipEvents } = await supabase
-      .from("order_events")
-      .select("order_id, event_type, occurred_at")
-      .eq("shop_id", shopId)
-      .in("event_type", ["dispatch_skipped", "dispatch_restored"])
-      .order("occurred_at", { ascending: true });
-
-    const activeSkippedOrderIds = new Set<string>();
-    (skipEvents || []).forEach((ev: { order_id: string; event_type: string }) => {
-      if (ev.event_type === "dispatch_skipped") {
-        activeSkippedOrderIds.add(ev.order_id);
-      } else if (ev.event_type === "dispatch_restored") {
-        activeSkippedOrderIds.delete(ev.order_id);
-      }
-    });
-
-    const skippedArray = Array.from(activeSkippedOrderIds);
 
     let query = supabase
       .from("orders")
       .select(
-        "id,name,order_number,customer_name,customer_phone,customer_email,shipping_address,billing_address,note,total_minor,subtotal_minor,discount_minor,shipping_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor,product_snapshot),dispatches(id,status,phase,tracking_id,courier_reference,courier_status,safe_error_message,dispatched_at,courier_configs(id,couriers(provider,display_name)))",
+        "id,name,order_number,customer_name,customer_phone,customer_email,total_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,is_skipped,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor),dispatches(id,status,tracking_id,courier_status,dispatched_at,courier_configs(id,couriers(display_name)))",
         { count: "estimated" }
       )
       .eq("shop_id", shopId)
@@ -112,44 +88,28 @@ export async function GET(request: NextRequest) {
 
     // ─── TAB / SECTION FILTERING ───
     if (filter === "ready") {
-      // Primary Queue: not cancelled, not fulfilled, not dispatched, has phone & address, not skipped
       query = query
         .is("cancelled_at", null)
         .neq("fulfillment_status", "FULFILLED")
         .neq("dispatch_status", "dispatched")
-        .not("customer_phone", "is", null);
-
-      if (skippedArray.length > 0) {
-        query = query.not("id", "in", `(${skippedArray.join(",")})`);
-      }
+        .not("customer_phone", "is", null)
+        .eq("is_skipped", false);
     } else if (filter === "unfulfilled") {
-      // Unfulfilled: Must NOT include cancelled orders or dispatched orders or skipped
       query = query
         .is("cancelled_at", null)
         .eq("fulfillment_status", "UNFULFILLED")
-        .neq("dispatch_status", "dispatched");
-
-      if (skippedArray.length > 0) {
-        query = query.not("id", "in", `(${skippedArray.join(",")})`);
-      }
+        .neq("dispatch_status", "dispatched")
+        .eq("is_skipped", false);
     } else if (filter === "pending") {
-      // Pending Payment: Must NOT include cancelled orders
       query = query
         .is("cancelled_at", null)
         .eq("financial_status", "PENDING");
     } else if (filter === "attention") {
-      // Attention Required: not cancelled, has failed dispatch OR missing phone OR missing address
       query = query
         .is("cancelled_at", null)
         .or("dispatch_status.eq.failed,customer_phone.is.null,shipping_address.eq.{}");
     } else if (filter === "skipped") {
-      // Skipped Orders
-      if (skippedArray.length > 0) {
-        query = query.in("id", skippedArray);
-      } else {
-        // Return empty result
-        query = query.eq("id", "00000000-0000-0000-0000-000000000000");
-      }
+      query = query.eq("is_skipped", true);
     } else if (filter === "on_hold") {
       query = query
         .is("cancelled_at", null)
@@ -273,27 +233,14 @@ export async function GET(request: NextRequest) {
     const { data, count, error } = await query;
     if (error) throw error;
 
-    // Attach active skipped flag to order items
-    const enrichedData = (data || []).map((o: { id: string }) => ({
-      ...o,
-      is_skipped: activeSkippedOrderIds.has(o.id)
-    }));
-
     const responsePayload = {
-      data: enrichedData,
+      data,
       count: count || 0,
       page,
       size,
-      activeSkippedCount: activeSkippedOrderIds.size
     };
 
-    if (redis) {
-      try {
-        await redis.set(cacheKey, responsePayload, { ex: 30 });
-      } catch (err) {
-        console.warn("Redis set failed:", err);
-      }
-    }
+    await setCache(cacheKey, responsePayload, 30);
 
     return NextResponse.json(responsePayload, {
       headers: {

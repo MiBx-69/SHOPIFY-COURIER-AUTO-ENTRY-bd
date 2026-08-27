@@ -1,10 +1,16 @@
 import { Redis } from "@upstash/redis";
 import crypto from "crypto";
 
-export const redis = new Redis({
-  url: process.env.UPSTASH_REDIS_REST_URL || "",
-  token: process.env.UPSTASH_REDIS_REST_TOKEN || "",
-});
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL || "";
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || "";
+
+export const redis: Redis | null = redisUrl && redisToken 
+  ? new Redis({ url: redisUrl, token: redisToken }) 
+  : null;
+
+if (!redis) {
+  console.warn("⚠️ Redis client initialized in fallback mode: UPSTASH_REDIS_REST_URL or TOKEN is missing.");
+}
 
 export function generateCacheKey(shopId: string, prefix: string, params: Record<string, unknown> = {}) {
   const hash = crypto.createHash("sha256").update(JSON.stringify(params)).digest("hex").slice(0, 16);

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback, useTransition } from "react";
+import { useMemo, useState, useCallback, useTransition, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { 
@@ -163,6 +164,21 @@ function fmtFullDate(dateStr: string | null) {
   return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
 }
 
+const defaultCounts: TabCounts = {
+  all: 0,
+  ready: 0,
+  unfulfilled: 0,
+  pending: 0,
+  attention: 0,
+  dispatched: 0,
+  failed: 0,
+  on_hold: 0,
+  partially_fulfilled: 0,
+  fulfilled: 0,
+  cancelled: 0,
+  skipped: 0
+};
+
 export function OrderList({ 
   shopId, 
   mode = "orders",
@@ -178,6 +194,7 @@ export function OrderList({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
 
   const isDispatchedMode = mode === "dispatched";
 
@@ -186,12 +203,8 @@ export function OrderList({
   const initialDate = searchParams.get("date") || "";
   const initialSearch = searchParams.get("q") || "";
 
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [counts, setCounts] = useState<TabCounts | null>(null);
-  const [search, setSearch] = useState(initialSearch);
   const [tab, setTab] = useState(initialTab);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>();
+  const [search, setSearch] = useState(initialSearch);
   const [selected, setSelected] = useState<string[]>([]);
   const [selectedOrderCache, setSelectedOrderCache] = useState<Map<string, Order>>(new Map());
   const [notice, setNotice] = useState<{ text: string; type: "success" | "error" | "info" } | null>(null);
@@ -209,14 +222,12 @@ export function OrderList({
   const [filterMaxAmount, setFilterMaxAmount] = useState(searchParams.get("maxAmount") || "");
 
   // Saved Filters
-  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const [newFilterName, setNewFilterName] = useState("");
   const [savingFilter, setSavingFilter] = useState(false);
 
   // Pagination & Action states
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
-  const [totalCount, setTotalCount] = useState(0);
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null);
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
@@ -230,7 +241,6 @@ export function OrderList({
   };
 
   // Pickup Locations Cache State
-  const [courierPickupMap, setCourierPickupMap] = useState<Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>>({});
 
   // Modals & Sheets
   const [singleDispatchOrder, setSingleDispatchOrder] = useState<Order | null>(null);
@@ -284,100 +294,97 @@ export function OrderList({
     window.history.replaceState(null, "", target);
   }, [isDispatchedMode, filterPayment, filterCourier, filterMinAmount, filterMaxAmount]);
 
-  // Load Tab Counts
-  const loadCounts = useCallback(async () => {
-    try {
+  const activeTab = isDispatchedMode ? "dispatched" : tab;
+
+  const { data: countsData } = useQuery({
+    queryKey: ["orders-counts", shopId],
+    queryFn: async () => {
       const res = await fetch(`/api/orders/counts?shopId=${shopId}`);
-      if (res.ok) {
-        const body = await res.json();
-        setCounts(body.data);
-      }
-    } catch {
-      // Non-blocking
-    }
-  }, [shopId]);
+      if (!res.ok) throw new Error("Failed");
+      const body = await res.json();
+      return body.data as TabCounts;
+    },
+    refetchInterval: 15000,
+  });
 
-  // Load Saved Filters
-  const loadSavedFilters = useCallback(async () => {
-    try {
+  const { data: savedFiltersData } = useQuery({
+    queryKey: ["saved-filters", shopId],
+    queryFn: async () => {
       const res = await fetch(`/api/saved-filters?shopId=${shopId}`);
-      if (res.ok) {
-        const body = await res.json();
-        setSavedFilters(body.data || []);
-      }
-    } catch {
-      // Non-blocking
+      if (!res.ok) throw new Error("Failed");
+      const body = await res.json();
+      return body.data as SavedFilter[];
     }
-  }, [shopId]);
+  });
 
-  // Load Courier Pickup Locations for this shop
-  const loadCourierPickupLocations = useCallback(async () => {
-    try {
+  const { data: pickupLocationsData } = useQuery({
+    queryKey: ["pickup-locations", shopId],
+    queryFn: async () => {
       const res = await fetch(`/api/shops/${shopId}/pickup-locations`);
-      if (res.ok) {
-        const body = await res.json();
-        setCourierPickupMap(body.data || {});
-      }
-    } catch {
-      // Non-blocking
+      if (!res.ok) throw new Error("Failed");
+      const body = await res.json();
+      return body.data as Record<string, { courierName: string; provider: string; locations: PickupLocation[]; defaultLocationId?: string }>;
     }
-  }, [shopId]);
+  });
 
-  // Load Orders
-  const loadOrders = useCallback(async () => {
-    setLoading(true);
-    setError(undefined);
-    try {
-      const activeTab = isDispatchedMode ? "dispatched" : tab;
-      const params = new URLSearchParams({
-        shopId,
-        tab: activeTab,
-        q: search,
-        page: page.toString(),
-        size: pageSize.toString()
-      });
-      if (filterDate) params.set("date", filterDate);
-      if (filterStartDate) params.set("startDate", filterStartDate);
-      if (filterEndDate) params.set("endDate", filterEndDate);
-      if (filterPayment !== "all") params.set("payment", filterPayment);
-      if (filterFulfillment !== "all") params.set("fulfillment", filterFulfillment);
-      if (filterCourier !== "all") params.set("courier", filterCourier);
-      if (filterMinAmount) params.set("minAmount", filterMinAmount);
-      if (filterMaxAmount) params.set("maxAmount", filterMaxAmount);
+  const ordersQueryParams = useMemo(() => {
+    const params = new URLSearchParams({
+      shopId,
+      tab: activeTab,
+      q: search,
+      page: page.toString(),
+      size: pageSize.toString()
+    });
+    if (filterDate) params.set("date", filterDate);
+    if (filterStartDate) params.set("startDate", filterStartDate);
+    if (filterEndDate) params.set("endDate", filterEndDate);
+    if (filterPayment !== "all") params.set("payment", filterPayment);
+    if (filterFulfillment !== "all") params.set("fulfillment", filterFulfillment);
+    if (filterCourier !== "all") params.set("courier", filterCourier);
+    if (filterMinAmount) params.set("minAmount", filterMinAmount);
+    if (filterMaxAmount) params.set("maxAmount", filterMaxAmount);
+    return params.toString();
+  }, [shopId, activeTab, search, page, pageSize, filterDate, filterStartDate, filterEndDate, filterPayment, filterFulfillment, filterCourier, filterMinAmount, filterMaxAmount]);
 
-      const response = await fetch(`/api/orders?${params}`);
+  const { data: ordersResponse, isLoading: loading, error: ordersError } = useQuery({
+    queryKey: ["orders-list", ordersQueryParams],
+    queryFn: async () => {
+      const response = await fetch(`/api/orders?${ordersQueryParams}`);
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "Failed to load orders");
-      const loaded: Order[] = body.data || [];
-      setOrders(loaded);
-      setTotalCount(body.count || 0);
+      return { data: body.data as Order[], count: body.count as number };
+    },
+    placeholderData: (prev) => prev, // keeps old data visible while fetching new page
+  });
 
+  const orders = ordersResponse?.data || [];
+  const totalCount = ordersResponse?.count || 0;
+  const counts = countsData || defaultCounts;
+  const savedFilters = savedFiltersData || [];
+  const courierPickupMap = pickupLocationsData || {};
+  const error = ordersError ? ordersError.message : undefined;
+
+  // Maintain selected cache across pages
+  useEffect(() => {
+    if (orders.length > 0) {
       setSelectedOrderCache((prev) => {
         const next = new Map(prev);
-        loaded.forEach((o) => {
+        orders.forEach((o) => {
           if (selectedSet.has(o.id)) {
             next.set(o.id, o);
           }
         });
         return next;
       });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
     }
-  }, [shopId, isDispatchedMode, tab, search, page, pageSize, filterDate, filterStartDate, filterEndDate, filterPayment, filterFulfillment, filterCourier, filterMinAmount, filterMaxAmount, selectedSet]);
+  }, [orders, selectedSet]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      loadOrders();
-      loadCounts();
-      loadSavedFilters();
-      loadCourierPickupLocations();
-      updateUrl(isDispatchedMode ? "dispatched" : tab, filterDate, search);
+      updateUrl(activeTab, filterDate, search);
     }, search ? 250 : 0);
     return () => window.clearTimeout(timer);
-  }, [loadOrders, loadCounts, loadSavedFilters, loadCourierPickupLocations, updateUrl, tab, filterDate, search, isDispatchedMode]);
+  }, [updateUrl, activeTab, filterDate, search]);
 
   // Realtime updates
   useEffect(() => {
@@ -385,19 +392,19 @@ export function OrderList({
     const channel = supabase
       .channel(`orders_rt:${shopId}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `shop_id=eq.${shopId}` }, () => {
-        loadOrders();
-        loadCounts();
+        queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+        queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
       })
       .on("postgres_changes", { event: "*", schema: "public", table: "dispatches", filter: `shop_id=eq.${shopId}` }, () => {
-        loadOrders();
-        loadCounts();
+        queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+        queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [shopId, loadOrders, loadCounts]);
+  }, [shopId, queryClient]);
 
   // Handle Tab Switch
   function handleTabChange(newTab: string) {
@@ -543,15 +550,15 @@ export function OrderList({
         text: `Order ${singleDispatchOrder.name} dispatched successfully${courierTag}!${trackingTag}`, 
         type: "success" 
       });
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch (err: unknown) {
       setNotice({ 
         text: `Dispatch failed for ${singleDispatchOrder.name}: ${err instanceof Error ? err.message : "Courier rejected request"}`, 
         type: "error" 
       });
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } finally {
       setActionLoadingId(null);
       setSingleDispatchOrder(null);
@@ -606,8 +613,8 @@ export function OrderList({
       });
       setShowResultModal(true);
       setSelected([]);
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch (err: unknown) {
       setNotice({ text: err instanceof Error ? err.message : "Bulk dispatch failed", type: "error" });
     } finally {
@@ -626,8 +633,8 @@ export function OrderList({
       });
       if (!res.ok) throw new Error("Could not skip order");
       setNotice({ text: "Order removed from dispatch queue.", type: "info" });
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch (err: unknown) {
       setNotice({ text: err instanceof Error ? err.message : "Skip failed", type: "error" });
     } finally {
@@ -645,8 +652,8 @@ export function OrderList({
       });
       if (!res.ok) throw new Error("Could not restore order");
       setNotice({ text: "Order restored to dispatch queue.", type: "success" });
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch (err: unknown) {
       setNotice({ text: err instanceof Error ? err.message : "Restore failed", type: "error" });
     } finally {
@@ -665,8 +672,8 @@ export function OrderList({
       });
       if (!res.ok) throw new Error("Could not cancel dispatch");
       setNotice({ text: "Dispatch cancelled.", type: "info" });
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch (err: unknown) {
       setNotice({ text: err instanceof Error ? err.message : "Cancellation failed", type: "error" });
     } finally {
@@ -686,8 +693,8 @@ export function OrderList({
       })));
       setNotice({ text: `${selected.length} orders removed from dispatch queue.`, type: "info" });
       setSelected([]);
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch {
       setNotice({ text: "Failed to skip some orders.", type: "error" });
     } finally {
@@ -705,8 +712,8 @@ export function OrderList({
       })));
       setNotice({ text: `${selected.length} orders restored to dispatch queue.`, type: "success" });
       setSelected([]);
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch {
       setNotice({ text: "Failed to restore some orders.", type: "error" });
     } finally {
@@ -725,8 +732,8 @@ export function OrderList({
       })));
       setNotice({ text: `${selected.length} courier dispatches cancelled.`, type: "info" });
       setSelected([]);
-      loadOrders();
-      loadCounts();
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
     } catch {
       setNotice({ text: "Failed to cancel some dispatches.", type: "error" });
     } finally {
@@ -834,8 +841,8 @@ export function OrderList({
           {/* Refresh button */}
           <button
             onClick={() => {
-              loadOrders();
-              loadCounts();
+              queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+              queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
             }}
             disabled={loading}
             title="Refresh orders"

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import "./globals.css";
 import { AppBridgeProvider } from "@/components/app-bridge-provider";
+import { ReactQueryProvider } from "@/components/query-provider";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "https://orders.universesraw.com"),
@@ -45,10 +46,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <link rel="apple-touch-icon" href="/logo.png" />
       </head>
       <body>
-        <Suspense fallback={null}>
-          <AppBridgeProvider />
-        </Suspense>
-        {children}
+        <ReactQueryProvider>
+          <Suspense fallback={null}>
+            <AppBridgeProvider />
+          </Suspense>
+          {children}
+        </ReactQueryProvider>
       </body>
     </html>
   );

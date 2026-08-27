@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { hashPayload, safeShopDomain, verifyWebhook } from "@/lib/security/shopify";
+import { invalidateOrderCaches } from "@/lib/cache";
 
 export async function POST(request: NextRequest) {
   const raw = await request.text();
@@ -63,6 +64,9 @@ export async function POST(request: NextRequest) {
       if (orderGid) {
         const { ShopifySyncService } = await import("@/services/synchronization/shopify-sync");
         await new ShopifySyncService().syncOrder(shop.id, orderGid);
+        
+        // Invalidate caches immediately so users see fresh data
+        await invalidateOrderCaches(shop.organization_id, shop.id);
       }
     }
 
