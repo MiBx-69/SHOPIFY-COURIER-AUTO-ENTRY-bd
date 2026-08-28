@@ -574,16 +574,11 @@ export function DispatchSettings({
             <p className="font-bold text-slate-900 text-sm">Automatic Courier Selection</p>
             <p className="text-xs text-slate-500">Automatically select the highest priority enabled courier when manual selection is omitted.</p>
           </div>
-          <Button 
-            onClick={() => {
-              setAutomatic(!automatic);
-            }} 
-            disabled={busy} 
-            variant={automatic ? "primary" : "secondary"}
-            className="text-xs h-8"
-          >
-            {automatic ? "ENABLED" : "DISABLED"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-500 bg-slate-100 px-2 py-1 rounded">
+              Managed by Routing Rules
+            </span>
+          </div>
         </div>
 
         <div className="mt-4">

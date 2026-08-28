@@ -548,12 +548,15 @@ export function OrderList({
   // Single Order Dispatch Flow
   function openSingleDispatchModal(order: Order) {
     setSingleDispatchOrder(order);
-    const firstCourier = availableCouriers[0]?.id || "";
-    setSingleDispatchCourierId(firstCourier);
+    
+    // Resolve courier from rules
+    const routedCourier = resolveCourierForOrder(order, shippingRules, candidateCouriers, courierPickupMap);
+    const initialCourierId = routedCourier?.courierConfigId || availableCouriers[0]?.id || "";
+    setSingleDispatchCourierId(initialCourierId);
 
-    const locationsData = courierPickupMap[firstCourier];
+    const locationsData = courierPickupMap[initialCourierId];
     const defaultLoc = locationsData?.locations?.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || locationsData?.locations?.[0];
-    setSingleDispatchPickupLocationId(defaultLoc?.id || "");
+    setSingleDispatchPickupLocationId(routedCourier?.pickupLocationId || defaultLoc?.id || "");
 
     setShowDispatchModal(true);
   }
@@ -604,12 +607,24 @@ export function OrderList({
       setNotice({ text: "None of the selected orders are eligible for dispatch.", type: "error" });
       return;
     }
-    const firstCourier = availableCouriers[0]?.id || "";
-    setBulkCourierId(firstCourier);
+    
+    // For bulk, if all selected ready orders resolve to the same courier, use it. Otherwise leave blank for auto or use first.
+    let commonCourierId = "";
+    let firstLocId = "";
+    if (dispatchValidation.ready.length > 0) {
+      const firstRouted = resolveCourierForOrder(dispatchValidation.ready[0], shippingRules, candidateCouriers, courierPickupMap);
+      if (firstRouted && dispatchValidation.ready.every(o => resolveCourierForOrder(o, shippingRules, candidateCouriers, courierPickupMap)?.courierConfigId === firstRouted.courierConfigId)) {
+        commonCourierId = firstRouted.courierConfigId;
+        firstLocId = firstRouted.pickupLocationId || "";
+      }
+    }
+    
+    const initialCourierId = commonCourierId || availableCouriers[0]?.id || "";
+    setBulkCourierId(initialCourierId);
 
-    const locationsData = courierPickupMap[firstCourier];
+    const locationsData = courierPickupMap[initialCourierId];
     const defaultLoc = locationsData?.locations?.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || locationsData?.locations?.[0];
-    setBulkPickupLocationId(defaultLoc?.id || "");
+    setBulkPickupLocationId(firstLocId || defaultLoc?.id || "");
 
     setShowDispatchModal(true);
   }
