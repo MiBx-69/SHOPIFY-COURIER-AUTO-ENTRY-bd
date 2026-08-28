@@ -1,0 +1,1 @@
+import { createAdminClient } from "../src/lib/supabase/admin"; async function run() { const admin = createAdminClient(); const { data, error } = await admin.from("orders").select("id, shipping_lines").limit(1); console.log("Error:", error); console.log("Data:", data); } run().catch(console.error);

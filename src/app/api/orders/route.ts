@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("orders")
       .select(
-        "id,name,order_number,customer_name,customer_phone,customer_email,shipping_address,shipping_lines,shipping_title,total_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,is_skipped,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor),dispatches(id,status,tracking_id,courier_status,dispatched_at,courier_configs(id,couriers(provider,display_name)))",
+        "id,name,order_number,customer_name,customer_phone,customer_email,shipping_address,total_minor,currency,financial_status,fulfillment_status,dispatch_status,shopify_created_at,shopify_updated_at,cancelled_at,is_skipped,order_line_items(id,title,variant_title,sku,quantity,unit_price_minor,total_price_minor),dispatches(id,status,tracking_id,courier_status,dispatched_at,courier_configs(id,couriers(provider,display_name)))",
         { count: "estimated" }
       )
       .eq("shop_id", shopId)
