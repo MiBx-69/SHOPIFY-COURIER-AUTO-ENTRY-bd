@@ -31,7 +31,7 @@ export async function PATCH(
       .from("shops")
       .update(updatePayload)
       .eq("id", shopId)
-      .select("automatic_courier, shipping_rules, redispatch_settings")
+      .select("automatic_courier")
       .single();
       
     if (error || !updated) throw error ?? new Error("Failed to update dispatch settings");

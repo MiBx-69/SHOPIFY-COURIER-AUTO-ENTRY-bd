@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
     // 3. Fetch shops config, shipping rules, and couriers
     const { data: shops } = await admin
       .from("shops")
-      .select("id, organization_id, automatic_courier, shipping_rules, redispatch_settings")
+      .select("id, organization_id, automatic_courier")
       .in("id", shopIds);
 
     const shopMap = new Map((shops || []).map((s) => [s.id, s]));
