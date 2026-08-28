@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Shield, Key, LogOut, RefreshCcw, Clock, Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createClient } from "@/lib/supabase/client";
@@ -30,6 +31,7 @@ function eventLabel(type: string) {
 }
 
 export function SecuritySettings({ email, recentEvents }: Props) {
+  const router = useRouter();
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [currentPass, setCurrentPass] = useState("");
   const [newPass, setNewPass] = useState("");
@@ -69,7 +71,7 @@ export function SecuritySettings({ email, recentEvents }: Props) {
       if (!res.ok) throw new Error("Logout failed");
       setLogoutStatus("success");
       // Clear local state and redirect
-      setTimeout(() => { window.location.assign("/login"); }, 1000);
+      setTimeout(() => { router.push("/login"); }, 1000);
     } catch {
       setLogoutStatus("error");
     }
@@ -82,7 +84,7 @@ export function SecuritySettings({ email, recentEvents }: Props) {
       const res = await fetch("/api/auth/logout-everywhere", { method: "POST" });
       if (!res.ok) throw new Error("Logout everywhere failed");
       setLogoutEverywhereStatus("success");
-      setTimeout(() => { window.location.assign("/login"); }, 1200);
+      setTimeout(() => { router.push("/login"); }, 1200);
     } catch {
       setLogoutEverywhereStatus("error");
     }

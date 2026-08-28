@@ -56,10 +56,10 @@ export function LoginForm() {
           setError(msg || "Passkey verification failed. Please try again or use your password.");
         }
       } else if (data?.session || data?.user) {
-        window.location.href = "/orders";
+        router.push("/orders");
         return;
       } else {
-        window.location.href = "/orders";
+        router.push("/orders");
         return;
       }
     } catch (err: unknown) {
@@ -101,7 +101,7 @@ export function LoginForm() {
         return;
       }
 
-      window.location.href = "/orders";
+      router.push("/orders");
     } catch (err: any) {
       console.error("Sign in error:", err);
       setError(err?.message || "Network error during sign in. Please try again.");
