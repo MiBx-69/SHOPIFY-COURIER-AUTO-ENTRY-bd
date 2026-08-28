@@ -36,7 +36,7 @@ export type ShopifyOrder = {
 
 const minor = (amount: string) => Math.round(Number(amount) * 100);
 
-const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingLines(first:5) { nodes { title code originalPriceSet { shopMoney { amount currencyCode } } } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } } fulfillmentOrders(first:10) { nodes { id status requestStatus fulfillmentHolds { reason reasonNotes } } }`;
+const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingLines(first:5) { nodes { title code originalPriceSet { shopMoney { amount currencyCode } } } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } }`;
 
 export function resolveFulfillmentStatus(source: ShopifyOrder): string {
   const displayStatus = (source.displayFulfillmentStatus || "UNFULFILLED").toUpperCase().trim();
@@ -95,9 +95,11 @@ export class ShopifySyncService {
         { query, cursor }
       );
 
-      for (const order of result.orders.nodes) {
-        await this.upsertOrder(shopId, order);
-        synchronized += 1;
+      const batchSize = 10;
+      for (let i = 0; i < result.orders.nodes.length; i += batchSize) {
+        const chunk = result.orders.nodes.slice(i, i + batchSize);
+        await Promise.all(chunk.map((order) => this.upsertOrder(shopId, order)));
+        synchronized += chunk.length;
       }
 
       cursor = result.orders.pageInfo.hasNextPage ? result.orders.pageInfo.endCursor : null;
