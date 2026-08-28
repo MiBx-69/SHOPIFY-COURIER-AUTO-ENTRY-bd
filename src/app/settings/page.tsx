@@ -28,6 +28,8 @@ import { SystemHealth } from "@/features/settings/system-health";
 import { SettingsTabs } from "@/features/settings/settings-tabs";
 import { DeveloperConsole } from "@/features/settings/developer-console";
 
+import { getAuthenticatedUser } from "@/lib/auth/session";
+
 export const metadata = { title: "Settings | MiBx-Dispatch" };
 
 export default async function SettingsPage({
@@ -35,8 +37,7 @@ export default async function SettingsPage({
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser();
   if (!user) redirect("/login");
 
   const admin = createAdminClient();

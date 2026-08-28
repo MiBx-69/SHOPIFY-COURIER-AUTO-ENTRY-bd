@@ -5,10 +5,12 @@ import { createErrorId } from "@/lib/errors";
 
 export class ApiError extends Error { constructor(public status: number, message: string) { super(message); } }
 
+import { getAuthenticatedUser } from "@/lib/auth/session";
+
 export async function currentUser() {
+  const user = await getAuthenticatedUser();
+  if (!user) throw new ApiError(401, "Authentication required");
   const supabase = await createServerSupabaseClient();
-  const { data: { user }, error } = await supabase.auth.getUser();
-  if (error || !user) throw new ApiError(401, "Authentication required");
   return { user, supabase };
 }
 

@@ -8,11 +8,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { OrderList } from "@/features/orders/order-list";
 import { OrderListSkeleton } from "@/components/ui/skeleton";
 
+import { getAuthenticatedUser } from "@/lib/auth/session";
+
 export const metadata = { title: "Dispatched | MiBx-Dispatch" };
 
 export default async function DispatchedPage({ searchParams }: { searchParams: Promise<{ shop?: string }> }) {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser();
   if (!user) redirect("/login");
 
   const admin = createAdminClient();

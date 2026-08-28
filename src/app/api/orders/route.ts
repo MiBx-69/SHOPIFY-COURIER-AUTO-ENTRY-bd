@@ -98,7 +98,7 @@ export async function GET(request: NextRequest) {
     } else if (filter === "unfulfilled") {
       query = query
         .is("cancelled_at", null)
-        .eq("fulfillment_status", "UNFULFILLED")
+        .or("fulfillment_status.eq.UNFULFILLED,fulfillment_status.eq.ON_HOLD")
         .neq("dispatch_status", "dispatched")
         .eq("is_skipped", false);
     } else if (filter === "pending") {
@@ -168,6 +168,8 @@ export async function GET(request: NextRequest) {
     if (fulfillment && fulfillment !== "all") {
       if (fulfillment === "cancelled") {
         query = query.not("cancelled_at", "is", null);
+      } else if (fulfillment === "unfulfilled") {
+        query = query.or("fulfillment_status.eq.UNFULFILLED,fulfillment_status.eq.ON_HOLD");
       } else {
         query = query.ilike("fulfillment_status", fulfillment);
       }

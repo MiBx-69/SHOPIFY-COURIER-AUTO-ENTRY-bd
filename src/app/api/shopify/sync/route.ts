@@ -11,10 +11,16 @@ export async function POST(request: NextRequest) {
     // Check if this is the first sync
     const { createAdminClient } = await import("@/lib/supabase/admin");
     const admin = createAdminClient();
-    const { data: shop } = await admin.from("shops").select("last_synced_at").eq("id", shopId).single();
+    const { data: shop } = await admin.from("shops").select("organization_id, last_synced_at").eq("id", shopId).single();
     
     const service = new ShopifySyncService();
     const count = (!shop?.last_synced_at) ? await service.initialSync(shopId) : await service.reconcile(shopId);
+    
+    // Invalidate order and count caches for this shop
+    if (shop?.organization_id) {
+      const { invalidateOrderCaches } = await import("@/lib/cache");
+      await invalidateOrderCaches(shop.organization_id, shopId);
+    }
     
     return NextResponse.json({ data: { synchronized: count } });
   } catch (error) {
