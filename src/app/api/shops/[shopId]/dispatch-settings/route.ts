@@ -4,7 +4,9 @@ import { apiError, requireShopPermission } from "@/lib/api/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const patchSchema = z.object({
-  automatic_courier: z.boolean()
+  automatic_courier: z.boolean().optional(),
+  shipping_rules: z.array(z.record(z.unknown())).optional(),
+  redispatch_settings: z.record(z.unknown()).optional()
 });
 
 export async function PATCH(
@@ -17,12 +19,19 @@ export async function PATCH(
     
     const input = patchSchema.parse(await request.json());
     
+    const updatePayload: Record<string, unknown> = {
+      updated_at: new Date().toISOString()
+    };
+    if (input.automatic_courier !== undefined) updatePayload.automatic_courier = input.automatic_courier;
+    if (input.shipping_rules !== undefined) updatePayload.shipping_rules = input.shipping_rules;
+    if (input.redispatch_settings !== undefined) updatePayload.redispatch_settings = input.redispatch_settings;
+
     const admin = createAdminClient();
     const { data: updated, error } = await admin
       .from("shops")
-      .update({ automatic_courier: input.automatic_courier })
+      .update(updatePayload)
       .eq("id", shopId)
-      .select("automatic_courier")
+      .select("automatic_courier, shipping_rules, redispatch_settings")
       .single();
       
     if (error || !updated) throw error ?? new Error("Failed to update dispatch settings");
@@ -37,7 +46,7 @@ export async function PATCH(
         action: "dispatch_settings.updated",
         entity_type: "shop",
         entity_id: shopId,
-        metadata: { automatic_courier: input.automatic_courier }
+        metadata: input
       });
     }
 

@@ -12,21 +12,22 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: shops } = await supabase.from("shops").select("id,name,shop_domain,automatic_courier").order("name");
+  const { data: shops } = await supabase.from("shops").select("id,name,shop_domain,automatic_courier,shipping_rules,redispatch_settings").order("name");
   const { shop: requested } = await searchParams;
   const shop = shops?.find((item) => item.id === requested) || shops?.[0];
 
-  let couriers: Array<{ id: string; name: string }> = [];
+  let couriers: Array<{ id: string; name: string; provider?: string }> = [];
   if (shop) {
     const { data: configs } = await supabase
       .from("courier_configs")
-      .select("id,couriers(display_name)")
+      .select("id,couriers(provider,display_name)")
       .eq("shop_id", shop.id)
       .eq("enabled", true)
       .order("priority");
     couriers = (configs || []).map((c: any) => ({
       id: c.id,
-      name: c.couriers?.display_name || "Courier"
+      name: c.couriers?.display_name || "Courier",
+      provider: c.couriers?.provider
     }));
   }
 
@@ -74,6 +75,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           shopId={shop.id} 
           automaticCourier={Boolean(shop.automatic_courier)} 
           availableCouriers={couriers} 
+          shippingRules={(shop as any).shipping_rules}
+          redispatchSettings={(shop as any).redispatch_settings}
         />
       ) : (
         <div className="rounded-lg bg-white p-8 text-center border border-slate-200 shadow-2xs">

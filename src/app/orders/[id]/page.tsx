@@ -184,9 +184,16 @@ export default async function OrderDetail({ params }: { params: Promise<{ id: st
           </div>
 
           <div className="border-t border-slate-100 pt-3">
-            <div className="flex items-center gap-1.5 text-slate-900 font-semibold mb-1">
-              <MapPin size={13} className="text-slate-400" />
-              Shipping Address
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1.5 text-slate-900 font-semibold">
+                <MapPin size={13} className="text-slate-400" />
+                Shipping Address
+              </div>
+              {order.shipping_title && (
+                <span className="text-[10px] bg-slate-100 text-slate-700 font-medium px-1.5 py-0.5 rounded border border-slate-200">
+                  {order.shipping_title}
+                </span>
+              )}
             </div>
             <p className="text-slate-600 leading-relaxed">{address || "No shipping address provided"}</p>
           </div>

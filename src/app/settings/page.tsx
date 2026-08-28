@@ -45,7 +45,7 @@ export default async function SettingsPage({
   // Fetch shops this user belongs to (RLS on shops respects membership)
   const { data: shops } = await supabase
     .from("shops")
-    .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,organization_id")
+    .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,shipping_rules,redispatch_settings,organization_id")
     .limit(1);
 
   const shop = shops?.[0] ?? null;
@@ -152,10 +152,15 @@ export default async function SettingsPage({
           <section>
             <div className="mb-4">
               <h2 className="text-base font-bold text-slate-900">Dispatch Settings</h2>
-              <p className="text-sm text-slate-500">Configure how and when orders are sent to couriers.</p>
+              <p className="text-sm text-slate-500">Configure courier routing based on shipping methods and one-click redispatch.</p>
             </div>
             <Suspense fallback={<div className="py-8 text-center text-sm text-slate-500">Loading dispatch settings...</div>}>
-              <DispatchTabAsync shopId={shop.id} automatic_courier={shop.automatic_courier} />
+              <DispatchTabAsync 
+                shopId={shop.id} 
+                automatic_courier={shop.automatic_courier} 
+                shipping_rules={(shop as any).shipping_rules}
+                redispatch_settings={(shop as any).redispatch_settings}
+              />
             </Suspense>
           </section>
         )}
@@ -268,7 +273,17 @@ async function CouriersTabAsync({ shopId }: { shopId: string }) {
   );
 }
 
-async function DispatchTabAsync({ shopId, automatic_courier }: { shopId: string, automatic_courier: any }) {
+async function DispatchTabAsync({ 
+  shopId, 
+  automatic_courier,
+  shipping_rules,
+  redispatch_settings
+}: { 
+  shopId: string; 
+  automatic_courier: any;
+  shipping_rules?: any;
+  redispatch_settings?: any;
+}) {
   const supabase = await createServerSupabaseClient();
   const { data: courierConfigs } = await supabase
     .from("courier_configs")
@@ -280,6 +295,8 @@ async function DispatchTabAsync({ shopId, automatic_courier }: { shopId: string,
     <DispatchSettings
       shopId={shopId}
       initialAutomatic={Boolean(automatic_courier)}
+      initialShippingRules={shipping_rules || []}
+      initialRedispatchSettings={redispatch_settings}
       configs={(courierConfigs ?? []) as any}
     />
   );

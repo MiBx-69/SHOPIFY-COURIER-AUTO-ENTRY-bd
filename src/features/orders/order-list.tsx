@@ -36,9 +36,16 @@ import { createClient } from "@/lib/supabase/client";
 import { 
   FulfillmentBadge, 
   PaymentBadge, 
-  DispatchBadge
+  DispatchBadge 
 } from "@/components/ui/status-badge";
 import type { PickupLocation } from "@/types/domain";
+import { 
+  detectShippingZone, 
+  resolveCourierForOrder, 
+  type ShippingRoutingRule, 
+  type RedispatchSettings,
+  type CourierCandidateInfo 
+} from "@/services/courier/routing";
 
 type LineItem = {
   id: string;
@@ -66,6 +73,8 @@ type Order = {
   customer_phone: string | null;
   customer_email: string | null;
   shipping_address: Record<string, string> | null;
+  shipping_lines?: Array<{ title: string; code?: string | null }> | null;
+  shipping_title?: string | null;
   total_minor: number;
   currency: string;
   fulfillment_status: string | null;
@@ -184,13 +193,21 @@ export function OrderList({
   mode = "orders",
   initialStatus = "ready",
   automaticCourier = true,
-  availableCouriers = []
+  availableCouriers = [],
+  shippingRules = [],
+  redispatchSettings = {
+    auto_restore: true,
+    use_shipping_rules: true,
+    one_click_instant: true
+  }
 }: { 
   shopId: string; 
   mode?: "orders" | "dispatched";
   initialStatus?: string;
   automaticCourier?: boolean;
-  availableCouriers?: Array<{ id: string; name: string }>;
+  availableCouriers?: Array<{ id: string; name: string; provider?: string }>;
+  shippingRules?: ShippingRoutingRule[];
+  redispatchSettings?: RedispatchSettings;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -367,6 +384,17 @@ export function OrderList({
   const savedFilters = savedFiltersData || [];
   const courierPickupMap = pickupLocationsData || {};
   const error = ordersError ? ordersError.message : undefined;
+
+  const candidateCouriers = useMemo<CourierCandidateInfo[]>(() => {
+    return availableCouriers.map((c, idx) => ({
+      id: c.id,
+      provider: (c.provider || "redx") as "redx" | "pathao" | "steadfast",
+      displayName: c.name,
+      enabled: true,
+      priority: idx + 1,
+      connectionStatus: "connected"
+    }));
+  }, [availableCouriers]);
 
   // Maintain selected cache across pages
   useEffect(() => {
@@ -666,6 +694,82 @@ export function OrderList({
     }
   }
 
+  async function handleSingleRedispatch(order: Order) {
+    setActionLoadingId(order.id);
+    try {
+      const res = await fetch("/api/dispatch/redispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: order.id })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to redispatch order");
+      }
+      const courierTag = data.courierName ? ` via ${data.courierName}` : "";
+      const trackingTag = data.trackingId ? ` (Tracking: ${data.trackingId})` : "";
+      setNotice({ 
+        text: `Order ${order.name} redispatched successfully${courierTag}!${trackingTag}`, 
+        type: "success" 
+      });
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
+    } catch (err: unknown) {
+      setNotice({ 
+        text: `Redispatch failed for ${order.name}: ${err instanceof Error ? err.message : "Courier rejected request"}`, 
+        type: "error" 
+      });
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
+    } finally {
+      setActionLoadingId(null);
+    }
+  }
+
+  async function executeBulkRedispatch() {
+    if (selected.length === 0) return;
+    setBatchProcessing(true);
+    try {
+      const res = await fetch("/api/dispatch/redispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderIds: selected })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to process bulk redispatch");
+
+      const resList: BulkResultItem[] = (data.results || []).map((r: any) => ({
+        orderId: r.orderId,
+        orderName: r.orderName,
+        status: r.status,
+        trackingId: r.trackingId,
+        courierName: r.courierName,
+        reason: r.error,
+        message: r.message
+      }));
+      const successCount = resList.filter((r) => r.status === "dispatched").length;
+      const failedCount = resList.filter((r) => r.status === "failed").length;
+
+      setBulkResults({
+        title: "Bulk Redispatch Results",
+        summary: {
+          total: selected.length,
+          success: successCount,
+          failed: failedCount
+        },
+        results: resList
+      });
+      setShowResultModal(true);
+      setSelected([]);
+      queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+      queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
+    } catch (err: unknown) {
+      setNotice({ text: err instanceof Error ? err.message : "Bulk redispatch failed", type: "error" });
+    } finally {
+      setBatchProcessing(false);
+    }
+  }
+
   async function handleSingleCancelDispatch(orderId: string) {
     if (!window.confirm("Cancel courier shipment for this order?")) return;
     setActionLoadingId(orderId);
@@ -950,13 +1054,32 @@ export function OrderList({
             </button>
 
             {tab === "skipped" ? (
+              <div className="flex items-center gap-1.5">
+                <Button
+                  onClick={executeBulkRestore}
+                  disabled={batchProcessing}
+                  className="h-7 px-3 text-xs bg-slate-800 hover:bg-slate-700 text-white font-medium rounded transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <RotateCcw size={13} />
+                  <span>Restore ({selected.length})</span>
+                </Button>
+                <Button
+                  onClick={executeBulkRedispatch}
+                  disabled={batchProcessing}
+                  className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <Truck size={13} />
+                  <span>Redispatch ({selected.length})</span>
+                </Button>
+              </div>
+            ) : tab === "failed" ? (
               <Button
-                onClick={executeBulkRestore}
+                onClick={executeBulkRedispatch}
                 disabled={batchProcessing}
-                className="h-7 px-3 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded transition-all cursor-pointer flex items-center gap-1.5"
+                className="h-7 px-3 text-xs bg-amber-600 hover:bg-amber-500 text-white font-bold rounded transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <RotateCcw size={13} />
-                <span>Restore Selected ({selected.length})</span>
+                <span>Redispatch Selected ({selected.length})</span>
               </Button>
             ) : isDispatchedMode || tab === "dispatched" ? (
               <Button
@@ -1059,6 +1182,7 @@ export function OrderList({
               <th className="px-2.5 py-2">Order</th>
               <th className="px-2.5 py-2">Customer</th>
               <th className="px-2.5 py-2">Items</th>
+              <th className="px-2.5 py-2">Destination / Shipping</th>
               <th className="px-2.5 py-2 text-right">Total</th>
               <th className="px-2.5 py-2">Payment</th>
               <th className="px-2.5 py-2">Fulfillment</th>
@@ -1071,14 +1195,14 @@ export function OrderList({
           <tbody className="divide-y divide-slate-100 text-xs">
             {loading && orders.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-12 text-center text-slate-400">
+                <td colSpan={12} className="py-12 text-center text-slate-400">
                   <RefreshCw size={18} className="mx-auto animate-spin mb-1.5" />
                   <p className="text-xs font-medium">Loading orders…</p>
                 </td>
               </tr>
             ) : orders.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-10 text-center text-slate-500">
+                <td colSpan={12} className="py-10 text-center text-slate-500">
                   <p className="font-semibold text-slate-800">
                     {isDispatchedMode ? "No dispatched orders found" : "No orders found"}
                   </p>
@@ -1107,6 +1231,10 @@ export function OrderList({
                 const fulfillmentStatus = isCancelled 
                   ? "CANCELLED" 
                   : (order.fulfillment_status || "UNFULFILLED");
+
+                const shippingTitle = order.shipping_title || order.shipping_lines?.[0]?.title || null;
+                const zoneInfo = detectShippingZone(order.shipping_address, shippingTitle);
+                const routedCourier = resolveCourierForOrder(order, shippingRules, candidateCouriers, courierPickupMap);
 
                 return (
                   <tr 
@@ -1137,7 +1265,7 @@ export function OrderList({
                     </td>
 
                     {/* Customer */}
-                    <td className="px-2.5 py-1.5 max-w-[140px] truncate text-slate-700" title={order.customer_name || "—"}>
+                    <td className="px-2.5 py-1.5 max-w-[130px] truncate text-slate-700" title={order.customer_name || "—"}>
                       <span className="font-medium truncate block">{order.customer_name || "—"}</span>
                       {order.customer_phone ? (
                         <div className="flex items-center gap-1.5 mt-0.5">
@@ -1164,6 +1292,27 @@ export function OrderList({
                       <ProductPreview items={order.order_line_items || []} maxVisible={1} />
                     </td>
 
+                    {/* Shipping Destination & Method */}
+                    <td className="px-2.5 py-1.5 align-middle">
+                      <div className="flex flex-col gap-0.5 max-w-[160px]">
+                        <span className={cn(
+                          "inline-flex items-center gap-1 font-semibold text-[10px] px-1.5 py-0.5 rounded-md w-fit",
+                          zoneInfo.zone === "inside_dhaka" 
+                            ? "bg-blue-50 text-blue-700 border border-blue-200/80" 
+                            : "bg-slate-100 text-slate-700 border border-slate-200"
+                        )}>
+                          <MapPin size={9} className={zoneInfo.zone === "inside_dhaka" ? "text-blue-600" : "text-slate-500"} />
+                          <span className="truncate">{zoneInfo.label}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-500 truncate block pl-0.5" title={`${zoneInfo.cityOrArea}${shippingTitle ? ` · Rate: ${shippingTitle}` : ""}`}>
+                          {zoneInfo.cityOrArea}
+                          {shippingTitle && (
+                            <span className="text-slate-400"> ({shippingTitle})</span>
+                          )}
+                        </span>
+                      </div>
+                    </td>
+
                     {/* Total */}
                     <td className="px-2.5 py-1.5 text-right font-semibold text-slate-900 whitespace-nowrap">
                       {money(order.total_minor, order.currency)}
@@ -1179,10 +1328,22 @@ export function OrderList({
                       <FulfillmentBadge status={fulfillmentStatus} />
                     </td>
 
-                    {/* Courier */}
-                    <td className="px-2.5 py-1.5 whitespace-nowrap text-slate-600 text-[11px]">
+                    {/* Courier Column */}
+                    <td className="px-2.5 py-1.5 whitespace-nowrap text-[11px]">
                       {courierName ? (
-                        <span className="font-medium text-slate-800">{courierName}</span>
+                        <span className="font-semibold text-slate-800">{courierName}</span>
+                      ) : routedCourier ? (
+                        <div className="flex items-center gap-1">
+                          <span className={cn(
+                            "font-semibold text-[10px] px-1.5 py-0.5 rounded border uppercase",
+                            routedCourier.provider === "redx" ? "bg-red-50 text-red-700 border-red-200" :
+                            routedCourier.provider === "pathao" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                            "bg-blue-50 text-blue-700 border-blue-200"
+                          )} title={`Routed by rule: ${routedCourier.matchedRuleName || "Priority"}`}>
+                            {routedCourier.courierName}
+                          </span>
+                          <span className="text-[9px] text-slate-400 font-medium">auto</span>
+                        </div>
                       ) : (
                         <span className="text-slate-400">—</span>
                       )}
@@ -1226,14 +1387,45 @@ export function OrderList({
                       {isCancelled ? (
                         <span className="text-[11px] text-slate-400 font-medium">Void</span>
                       ) : isSkipped ? (
-                        <button
-                          onClick={() => handleSingleRestore(order.id)}
-                          disabled={actionLoadingId === order.id}
-                          className="h-6.5 px-2.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer"
-                        >
-                          {actionLoadingId === order.id ? <RefreshCw size={11} className="animate-spin" /> : <RotateCcw size={11} />}
-                          Restore
-                        </button>
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleSingleRestore(order.id)}
+                            disabled={actionLoadingId === order.id}
+                            className="h-6.5 px-1.5 text-slate-400 hover:text-slate-700 text-[10px] font-medium transition-colors cursor-pointer"
+                            title="Restore without immediate dispatch"
+                          >
+                            Restore
+                          </button>
+                          <button
+                            onClick={() => handleSingleRedispatch(order)}
+                            disabled={actionLoadingId === order.id}
+                            className="h-6.5 px-2.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold transition-all inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer shadow-2xs"
+                            title="One-click redispatch with rule routing"
+                          >
+                            {actionLoadingId === order.id ? <RefreshCw size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                            <span>Redispatch</span>
+                          </button>
+                        </div>
+                      ) : isFailed ? (
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleSingleSkip(order.id)}
+                            disabled={actionLoadingId === order.id}
+                            className="h-6.5 px-1.5 text-slate-400 hover:text-slate-700 text-[10px] font-medium transition-colors cursor-pointer"
+                            title="Skip this failed order"
+                          >
+                            Skip
+                          </button>
+                          <button
+                            onClick={() => handleSingleRedispatch(order)}
+                            disabled={actionLoadingId === order.id}
+                            className="h-6.5 px-2.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[11px] font-bold transition-all inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer shadow-2xs"
+                            title="One-click redispatch"
+                          >
+                            {actionLoadingId === order.id ? <RefreshCw size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+                            <span>Redispatch</span>
+                          </button>
+                        </div>
                       ) : isDispatched ? (
                         <div className="inline-flex items-center justify-end gap-1">
                           <button
@@ -1259,14 +1451,7 @@ export function OrderList({
                           <button
                             onClick={() => openSingleDispatchModal(order)}
                             disabled={isDispatching}
-                            className={cn(
-                              "h-6.5 px-2.5 rounded text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 shadow-2xs",
-                              isDispatching
-                                ? "bg-slate-400 cursor-not-allowed opacity-80"
-                                : isFailed
-                                ? "bg-amber-700 hover:bg-amber-600 cursor-pointer"
-                                : "bg-slate-900 hover:bg-slate-800 cursor-pointer"
-                            )}
+                            className="h-6.5 px-2.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-[11px] font-medium transition-all inline-flex items-center gap-1 shadow-2xs cursor-pointer"
                           >
                             {isDispatching ? (
                               <>
@@ -1276,7 +1461,7 @@ export function OrderList({
                             ) : (
                               <>
                                 <Truck size={11} />
-                                <span>{isFailed ? "Retry" : "Dispatch"}</span>
+                                <span>Dispatch</span>
                               </>
                             )}
                           </button>
@@ -1321,6 +1506,10 @@ export function OrderList({
             const fulfillmentStatus = isCancelled 
               ? "CANCELLED" 
               : (order.fulfillment_status || "UNFULFILLED");
+
+            const shippingTitle = order.shipping_title || order.shipping_lines?.[0]?.title || null;
+            const zoneInfo = detectShippingZone(order.shipping_address, shippingTitle);
+            const routedCourier = resolveCourierForOrder(order, shippingRules, candidateCouriers, courierPickupMap);
 
             return (
               <div 
@@ -1377,8 +1566,38 @@ export function OrderList({
                     )}
                   </div>
 
+                  {/* Row 2.3: Destination & Routed Courier Strip */}
+                  <div className="mt-1.5 flex items-center justify-between gap-1 flex-wrap text-[10px]">
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span className={cn(
+                        "inline-flex items-center gap-0.5 font-semibold text-[9px] px-1 py-0.5 rounded",
+                        zoneInfo.zone === "inside_dhaka" 
+                          ? "bg-blue-50 text-blue-700 border border-blue-200/60" 
+                          : "bg-slate-100 text-slate-700 border border-slate-200"
+                      )}>
+                        <MapPin size={8} className={zoneInfo.zone === "inside_dhaka" ? "text-blue-600" : "text-slate-500"} />
+                        <span>{zoneInfo.label}</span>
+                      </span>
+                      <span className="text-slate-500 font-medium truncate max-w-[150px]">
+                        {zoneInfo.cityOrArea}
+                        {shippingTitle && <span className="text-slate-400"> ({shippingTitle})</span>}
+                      </span>
+                    </div>
+
+                    {routedCourier && (
+                      <span className={cn(
+                        "text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase shrink-0",
+                        routedCourier.provider === "redx" ? "bg-red-50 text-red-700 border-red-200" :
+                        routedCourier.provider === "pathao" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                        "bg-blue-50 text-blue-700 border-blue-200"
+                      )}>
+                        {routedCourier.courierName}
+                      </span>
+                    )}
+                  </div>
+
                   {/* Row 2.5: Product Preview */}
-                  <div className="mt-2.5">
+                  <div className="mt-2">
                     <ProductPreview items={order.order_line_items || []} maxVisible={2} />
                   </div>
 
@@ -1406,12 +1625,39 @@ export function OrderList({
                     {!isCancelled && (
                       <div className="shrink-0 pl-1">
                         {isSkipped ? (
-                          <button
-                            onClick={() => handleSingleRestore(order.id)}
-                            className="h-6.5 px-2.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-semibold cursor-pointer"
-                          >
-                            Restore
-                          </button>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleSingleRestore(order.id)}
+                              className="h-6.5 px-1.5 text-slate-500 hover:text-slate-800 text-[10px] font-medium cursor-pointer"
+                            >
+                              Restore
+                            </button>
+                            <button
+                              onClick={() => handleSingleRedispatch(order)}
+                              disabled={actionLoadingId === order.id}
+                              className="h-6.5 px-2.5 rounded bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs cursor-pointer"
+                            >
+                              {actionLoadingId === order.id ? <RefreshCw size={9} className="animate-spin" /> : <RotateCcw size={9} />}
+                              <span>Redispatch</span>
+                            </button>
+                          </div>
+                        ) : isFailed ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleSingleSkip(order.id)}
+                              className="h-6.5 px-1.5 text-slate-400 hover:text-slate-700 text-[10px] font-medium cursor-pointer"
+                            >
+                              Skip
+                            </button>
+                            <button
+                              onClick={() => handleSingleRedispatch(order)}
+                              disabled={actionLoadingId === order.id}
+                              className="h-6.5 px-2.5 rounded bg-amber-600 hover:bg-amber-500 text-white text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs cursor-pointer"
+                            >
+                              {actionLoadingId === order.id ? <RefreshCw size={9} className="animate-spin" /> : <RotateCcw size={9} />}
+                              <span>Redispatch</span>
+                            </button>
+                          </div>
                         ) : isDispatched ? (
                           <button
                             onClick={() => handleSingleCancelDispatch(order.id)}
@@ -1423,14 +1669,7 @@ export function OrderList({
                           <button
                             onClick={() => openSingleDispatchModal(order)}
                             disabled={isDispatching}
-                            className={cn(
-                              "h-6.5 px-2.5 rounded text-white text-[10px] font-semibold inline-flex items-center gap-1 shadow-2xs",
-                              isDispatching
-                                ? "bg-slate-400 cursor-not-allowed opacity-80"
-                                : isFailed
-                                ? "bg-amber-600 hover:bg-amber-500 cursor-pointer"
-                                : "bg-slate-900 hover:bg-slate-800 cursor-pointer"
-                            )}
+                            className="h-6.5 px-2.5 rounded bg-slate-900 hover:bg-slate-800 text-white text-[10px] font-semibold inline-flex items-center gap-1 shadow-2xs cursor-pointer"
                           >
                             {isDispatching ? (
                               <>
@@ -1440,7 +1679,7 @@ export function OrderList({
                             ) : (
                               <>
                                 <Truck size={10} />
-                                <span>{isFailed ? "Retry" : "Dispatch"}</span>
+                                <span>Dispatch</span>
                               </>
                             )}
                           </button>
