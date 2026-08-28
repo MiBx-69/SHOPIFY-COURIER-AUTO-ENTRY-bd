@@ -9,18 +9,7 @@ export type SessionUser = {
 };
 
 export async function getAuthenticatedUser(): Promise<SessionUser | null> {
-  // 1. Try standard Supabase getUser()
-  try {
-    const supabase = await createServerSupabaseClient();
-    const { data, error } = await supabase.auth.getUser();
-    if (!error && data?.user) {
-      return data.user as SessionUser;
-    }
-  } catch {
-    // Network or timeout occurred during remote verification
-  }
-
-  // 2. Fallback: Parse Supabase session cookie directly
+  // 1. Instant verification: Parse active JWT session cookie directly (0ms, zero network stalls)
   try {
     const cookieStore = await cookies();
     const allCookies = cookieStore.getAll();
@@ -57,7 +46,18 @@ export async function getAuthenticatedUser(): Promise<SessionUser | null> {
       }
     }
   } catch {
-    // Failed to parse cookie
+    // Failed to parse cookie, fall through to remote check
+  }
+
+  // 2. Fallback: Query Supabase Auth API
+  try {
+    const supabase = await createServerSupabaseClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (!error && data?.user) {
+      return data.user as SessionUser;
+    }
+  } catch {
+    // Remote network timeout or unavailable
   }
 
   return null;
