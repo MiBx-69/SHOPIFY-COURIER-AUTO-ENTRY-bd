@@ -983,11 +983,30 @@ export function OrderList({
           {/* Refresh button */}
           <button
             onClick={async () => {
-              setBatchProcessing(true); // Reusing this state to show global loading
+              setBatchProcessing(true);
               try {
-                await fetch(`/api/shopify/sync?shopId=${shopId}`, { method: "POST" });
-              } catch (e) {
+                const res = await fetch(`/api/shopify/sync?shopId=${shopId}`, { method: "POST" });
+                const json = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  const errorMsg = json.error || json.message || `Sync failed (${res.status})`;
+                  if (errorMsg.includes("401") || errorMsg.includes("Invalid API key") || errorMsg.includes("Unauthorized") || errorMsg.includes("access token")) {
+                    setNotice({
+                      text: "Shopify store needs reconnection. Please go to Settings → Shopify Store to reconnect.",
+                      type: "error"
+                    });
+                  } else {
+                    setNotice({ text: `Sync failed: ${errorMsg}`, type: "error" });
+                  }
+                } else {
+                  const count = json.data?.synchronized ?? 0;
+                  setNotice({
+                    text: `Shopify sync completed (${count} orders synchronized).`,
+                    type: "success"
+                  });
+                }
+              } catch (e: any) {
                 console.error("Manual sync failed", e);
+                setNotice({ text: `Network error during sync: ${e.message}`, type: "error" });
               } finally {
                 setBatchProcessing(false);
                 queryClient.invalidateQueries({ queryKey: ["orders-list"] });

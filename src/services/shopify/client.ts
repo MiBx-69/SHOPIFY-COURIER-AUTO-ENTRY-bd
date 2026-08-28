@@ -25,6 +25,9 @@ export async function shopifyGraphql<T>(shopId: string, query: string, variables
       continue;
     }
     
+    if (response.status === 401) {
+      throw new Error("Shopify access token is invalid or expired (401). Please reconnect your store in Settings → Shopify Store.");
+    }
     if (!response.ok) throw new Error(`Shopify request failed (${response.status})`);
     
     const result = await response.json() as { data?: T; errors?: Array<{ message: string }> };
