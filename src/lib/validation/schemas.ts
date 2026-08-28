@@ -4,13 +4,13 @@ export const dispatchRequestSchema = z.object({
   orderId: z.string().uuid(),
   idempotencyKey: z.string().uuid(),
   courierConfigId: z.string().uuid().optional(),
-  pickupLocationId: z.string().optional()
+  pickupLocationId: z.coerce.string().optional()
 });
 
 export const bulkDispatchSchema = z.object({
   orderIds: z.array(z.string().uuid()).min(1).max(250),
   courierConfigId: z.string().uuid().optional(),
-  pickupLocationId: z.string().optional()
+  pickupLocationId: z.coerce.string().optional()
 });
 
 export const courierConfigSchema = z.object({

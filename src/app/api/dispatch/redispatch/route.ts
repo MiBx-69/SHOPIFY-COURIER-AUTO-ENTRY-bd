@@ -12,7 +12,7 @@ const redispatchSchema = z.object({
   orderId: z.string().uuid().optional(),
   orderIds: z.array(z.string().uuid()).min(1).max(250).optional(),
   courierConfigId: z.string().uuid().optional(),
-  pickupLocationId: z.string().optional()
+  pickupLocationId: z.coerce.string().optional()
 }).refine((data) => Boolean(data.orderId || (data.orderIds && data.orderIds.length > 0)), {
   message: "orderId or orderIds is required"
 });
