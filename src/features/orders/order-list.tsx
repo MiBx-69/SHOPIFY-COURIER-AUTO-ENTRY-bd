@@ -120,6 +120,7 @@ type TabCounts = {
   partially_fulfilled: number;
   fulfilled: number;
   cancelled: number;
+  preparing: number;
 };
 
 type BulkResultItem = {
@@ -135,6 +136,7 @@ type BulkResultItem = {
 const ORDERS_TABS = [
   { id: "all", label: "All Orders" },
   { id: "ready", label: "Ready to Dispatch" },
+  { id: "preparing", label: "Preparing" },
   { id: "unfulfilled", label: "Unfulfilled" },
   { id: "pending", label: "Pending Payment" },
   { id: "attention", label: "Attention Required" },
@@ -185,7 +187,8 @@ const defaultCounts: TabCounts = {
   partially_fulfilled: 0,
   fulfilled: 0,
   cancelled: 0,
-  skipped: 0
+  skipped: 0,
+  preparing: 0
 };
 
 export function OrderList({ 

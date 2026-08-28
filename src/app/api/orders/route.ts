@@ -110,6 +110,10 @@ export async function GET(request: NextRequest) {
         .or("dispatch_status.eq.failed,customer_phone.is.null");
     } else if (filter === "skipped") {
       query = query.eq("is_skipped", true);
+    } else if (filter === "preparing") {
+      query = query
+        .is("cancelled_at", null)
+        .eq("fulfillment_status", "IN_PROGRESS");
     } else if (filter === "on_hold") {
       query = query
         .is("cancelled_at", null)

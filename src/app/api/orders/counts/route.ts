@@ -39,7 +39,8 @@ export async function GET(request: NextRequest) {
       partially_fulfilled: Number(counts.partially_fulfilled_count || 0),
       fulfilled: Number(counts.fulfilled_count || 0),
       cancelled: Number(counts.cancelled_count || 0),
-      skipped: Number(counts.skipped_count || 0)
+      skipped: Number(counts.skipped_count || 0),
+      preparing: Number(counts.preparing_count || 0)
     };
 
     await setCache(cacheKey, data, 15); // Cache for 15 seconds
