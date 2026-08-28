@@ -1,6 +1,15 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Activity, Package, Settings } from "lucide-react";
+import { 
+  Activity, 
+  Package, 
+  Settings, 
+  PanelLeftClose, 
+  PanelLeftOpen
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navigation = [
@@ -10,46 +19,125 @@ const navigation = [
 ];
 
 export function AppShell({ active, children }: { active: string; children: React.ReactNode }) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("mibx_sidebar_collapsed");
+    if (saved !== null) {
+      setIsCollapsed(saved === "true");
+    }
+  }, []);
+
+  const toggleCollapse = () => {
+    setIsCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("mibx_sidebar_collapsed", String(next));
+      return next;
+    });
+  };
+
   return (
     <div className="min-h-dvh w-full max-w-[100vw] overflow-x-hidden bg-slate-50 md:flex">
-      {/* Desktop Sidebar */}
-      <aside className="hidden w-56 shrink-0 border-r border-slate-200 bg-white p-4 md:block lg:w-60 lg:p-5">
-        <Link href="/orders" className="mb-6 flex items-center gap-2.5 px-1 group">
-          <Image
-            src="/logo.png"
-            alt="MiBx-Dispatch"
-            width={32}
-            height={32}
-            className="size-8 rounded-lg object-contain border border-slate-200/70 shadow-2xs shrink-0"
-            priority
-          />
-          <div className="min-w-0 flex-1">
-            <span className="font-bold text-slate-900 tracking-tight text-sm block leading-tight truncate">
-              MiBx-Dispatch
-            </span>
-            <span className="text-[10px] text-slate-400 font-medium tracking-tight block truncate">
-              Logistics Terminal
-            </span>
-          </div>
-        </Link>
-
-        <nav className="space-y-1">
-          {navigation.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
+      {/* Desktop Sidebar (Collapsible) */}
+      <aside 
+        className={cn(
+          "hidden shrink-0 border-r border-slate-200 bg-white transition-all duration-300 ease-in-out md:flex md:flex-col justify-between relative",
+          isCollapsed ? "w-16 p-3" : "w-52 lg:w-56 p-4"
+        )}
+      >
+        <div>
+          {/* Brand Header & Toggle */}
+          <div className={cn("mb-5 flex items-center justify-between gap-1.5 px-0.5", isCollapsed && "justify-center")}>
+            <Link 
+              href="/orders" 
               className={cn(
-                "flex min-h-9 items-center gap-2.5 rounded-lg px-3 text-xs font-semibold transition-all",
-                active === label
-                  ? "bg-slate-950 text-white shadow-2xs"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                "flex items-center gap-2.5 group overflow-hidden transition-all",
+                isCollapsed && "justify-center"
               )}
+              title="MiBx-Dispatch"
             >
-              <Icon size={16} />
-              <span>{label}</span>
+              <Image
+                src="/logo.png"
+                alt="MiBx-Dispatch"
+                width={32}
+                height={32}
+                className="size-8 rounded-lg object-contain border border-slate-200/70 shadow-2xs shrink-0"
+                priority
+              />
+              {!isCollapsed && (
+                <div className="min-w-0 flex-1">
+                  <span className="font-bold text-slate-900 tracking-tight text-sm block leading-tight truncate">
+                    MiBx-Dispatch
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-medium tracking-tight block truncate">
+                    Logistics Terminal
+                  </span>
+                </div>
+              )}
             </Link>
-          ))}
-        </nav>
+
+            {/* Collapse Toggle Button (Top Right when expanded) */}
+            {!isCollapsed && (
+              <button
+                type="button"
+                onClick={toggleCollapse}
+                title="Collapse sidebar to maximize screen"
+                className="size-7 rounded-lg border border-slate-200/80 bg-slate-50 flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0 cursor-pointer shadow-2xs"
+              >
+                <PanelLeftClose size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="space-y-1">
+            {navigation.map(({ href, label, icon: Icon }) => {
+              const isActive = active === label;
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  title={isCollapsed ? label : undefined}
+                  className={cn(
+                    "flex min-h-9 items-center rounded-xl font-semibold transition-all relative group",
+                    isCollapsed 
+                      ? "justify-center px-0 w-10 mx-auto" 
+                      : "gap-2.5 px-3 text-xs",
+                    isActive
+                      ? "bg-slate-950 text-white shadow-2xs"
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  )}
+                >
+                  <Icon size={16} className="shrink-0" />
+                  {!isCollapsed && (
+                    <span className="truncate">{label}</span>
+                  )}
+
+                  {/* Floating tooltip on hover when collapsed */}
+                  {isCollapsed && (
+                    <div className="absolute left-full ml-3 px-2.5 py-1 bg-slate-900 text-white text-[11px] font-semibold rounded-md opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity shadow-lg whitespace-nowrap z-50">
+                      {label}
+                    </div>
+                  )}
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Bottom Expand Toggle (When collapsed) */}
+        {isCollapsed && (
+          <div className="pt-3 border-t border-slate-100 flex justify-center">
+            <button
+              type="button"
+              onClick={toggleCollapse}
+              title="Expand sidebar"
+              className="size-8 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 hover:text-slate-950 flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
+            >
+              <PanelLeftOpen size={15} />
+            </button>
+          </div>
+        )}
       </aside>
 
       {/* Mobile Top Header (Visible only on small screens) */}
@@ -68,12 +156,11 @@ export function AppShell({ active, children }: { active: string; children: React
             <span className="text-[9px] text-slate-400 font-medium">Logistics Terminal</span>
           </div>
         </Link>
-        {/* Placeholder for Store name or Settings trigger if needed */}
       </header>
 
-      {/* Main Content Area */}
-      <main className="w-full min-w-0 flex-1 px-2.5 sm:px-4 md:px-6 lg:px-8 pt-2.5 sm:pt-4 pb-28 md:pb-8">
-        <div className="mx-auto w-full max-w-6xl min-w-0">
+      {/* Main Content Area - Expands to full screen */}
+      <main className="w-full min-w-0 flex-1 px-2.5 sm:px-4 md:px-5 lg:px-6 pt-2.5 sm:pt-4 pb-28 md:pb-8">
+        <div className="mx-auto w-full max-w-[1920px] min-w-0">
           {children}
         </div>
       </main>
@@ -108,5 +195,3 @@ export function AppShell({ active, children }: { active: string; children: React
     </div>
   );
 }
-
-
