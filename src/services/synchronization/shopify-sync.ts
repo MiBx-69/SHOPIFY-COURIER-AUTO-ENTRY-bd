@@ -85,7 +85,7 @@ export class ShopifySyncService {
       total_minor: minor(source.currentTotalPriceSet.shopMoney.amount),
       currency: source.currentTotalPriceSet.shopMoney.currencyCode,
       financial_status: source.displayFinancialStatus,
-      fulfillment_status: source.displayFulfillmentStatus === "UNFULFILLED" && source.fulfillmentOrders?.nodes.some(fo => fo.status === "IN_PROGRESS") ? "IN_PROGRESS" : source.displayFulfillmentStatus,
+      fulfillment_status: source.displayFulfillmentStatus === "UNFULFILLED" && source.fulfillmentOrders?.nodes.some(fo => fo.status === "IN_PROGRESS" || fo.status === "OPEN") ? "IN_PROGRESS" : source.displayFulfillmentStatus,
       cancelled_at: source.cancelledAt,
       closed_at: source.closedAt,
       shopify_created_at: source.createdAt,

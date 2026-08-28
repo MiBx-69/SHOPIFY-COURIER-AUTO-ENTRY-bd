@@ -28,17 +28,24 @@ export async function shopifyGraphql<T>(shopId: string, query: string, variables
     if (!response.ok) throw new Error(`Shopify request failed (${response.status})`);
     
     const result = await response.json() as { data?: T; errors?: Array<{ message: string }> };
-    if (result.errors?.length || !result.data) {
-      // Sometimes Shopify throws throttling as a GraphQL error: "Throttled"
-      const isThrottled = result.errors?.some(e => e.message.toLowerCase().includes("throttle"));
+    if (result.errors?.length) {
+      const isThrottled = result.errors.some(e => e.message.toLowerCase().includes("throttle"));
       if (isThrottled && attempts < maxAttempts) {
         const delayMs = Math.pow(2, attempts) * 1000;
         console.warn(`Shopify GraphQL Throttle hit. Retrying in ${delayMs}ms (Attempt ${attempts} of ${maxAttempts})`);
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
-      throw new Error(result.errors?.[0]?.message || "Shopify returned no data");
+      
+      const isFulfillmentAccessDenied = result.errors.some(e => e.message.includes("Access denied for fulfillmentOrders"));
+      if (isFulfillmentAccessDenied && result.data) {
+        console.warn("Shopify returned Access Denied for fulfillmentOrders. Please re-authenticate the app to grant merchant_managed_fulfillment_orders and third_party_fulfillment_orders scopes.");
+        return result.data; // Return the rest of the data
+      }
+
+      throw new Error(result.errors[0]?.message || "Shopify returned no data");
     }
+    if (!result.data) throw new Error("Shopify returned no data");
     return result.data;
   }
   throw new Error("Shopify request failed after retries");

@@ -982,15 +982,23 @@ export function OrderList({
 
           {/* Refresh button */}
           <button
-            onClick={() => {
-              queryClient.invalidateQueries({ queryKey: ["orders-list"] });
-              queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
+            onClick={async () => {
+              setBatchProcessing(true); // Reusing this state to show global loading
+              try {
+                await fetch(`/api/shopify/sync?shopId=${shopId}`, { method: "POST" });
+              } catch (e) {
+                console.error("Manual sync failed", e);
+              } finally {
+                setBatchProcessing(false);
+                queryClient.invalidateQueries({ queryKey: ["orders-list"] });
+                queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
+              }
             }}
-            disabled={loading}
-            title="Refresh orders"
+            disabled={loading || batchProcessing}
+            title="Sync from Shopify & Refresh"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50 transition-colors cursor-pointer"
           >
-            <RefreshCw size={14} className={cn(loading && "animate-spin text-slate-900")} />
+            <RefreshCw size={14} className={cn((loading || batchProcessing) && "animate-spin text-slate-900")} />
           </button>
         </div>
 
