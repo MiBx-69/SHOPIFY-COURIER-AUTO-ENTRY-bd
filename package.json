@@ -9,6 +9,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "clean": "node -e \"const fs=require('fs'); fs.rmSync('.next', {recursive: true, force: true}); console.log('.next cache cleared');\"",
+    "cache:flush": "tsx --env-file=.env.local scripts/flush-cache.ts",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
