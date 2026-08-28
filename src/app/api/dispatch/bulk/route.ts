@@ -3,6 +3,8 @@ import { apiError, currentUser } from "@/lib/api/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bulkDispatchSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
+import { resolveCourierForOrder, type ShippingRoutingRule, type CourierCandidateInfo } from "@/services/courier/routing";
+import { PickupLocationService } from "@/services/courier/pickup-locations";
 
 // ─── Concurrency-limited pool ─────────────────────────────────────────────────
 // Runs `handler` for each item but limits simultaneous executions to `concurrency`.
@@ -50,12 +52,15 @@ export async function POST(request: NextRequest) {
 
     const { data: shops } = await admin
       .from("shops")
-      .select("id, organization_id")
+      .select("id, organization_id, shipping_rules, redispatch_settings")
       .in("organization_id", authorizedOrgIds);
 
     const authorizedShopIds = new Set((shops || []).map((s: { id: string }) => s.id));
     const shopOrgMap = new Map(
       (shops || []).map((s: { id: string; organization_id: string }) => [s.id, s.organization_id])
+    );
+    const shopConfigMap = new Map(
+      (shops || []).map((s) => [s.id, s])
     );
 
     type OrderRecord = {
@@ -64,6 +69,8 @@ export async function POST(request: NextRequest) {
       shop_id: string;
       customer_phone: string | null;
       shipping_address: Record<string, unknown> | null;
+      shipping_lines: Array<{ title: string; code?: string | null }> | null;
+      shipping_title: string | null;
       dispatch_status: string;
       cancelled_at: string | null;
       total_minor: number;
@@ -73,12 +80,38 @@ export async function POST(request: NextRequest) {
     // 2. Fetch the orders being dispatched
     const { data: orders } = await admin
       .from("orders")
-      .select("id, name, shop_id, customer_phone, shipping_address, dispatch_status, cancelled_at, total_minor, currency")
+      .select("id, name, shop_id, customer_phone, shipping_address, shipping_lines, shipping_title, dispatch_status, cancelled_at, total_minor, currency")
       .in("id", input.orderIds);
 
     const orderMap = new Map(
       (((orders || []) as unknown) as OrderRecord[]).map((o) => [o.id, o])
     );
+
+    const targetShopIds = Array.from(new Set((orders || []).map((o) => o.shop_id)));
+
+    // Fetch courier candidate configurations for all relevant shops
+    const { data: configs } = await admin
+      .from("courier_configs")
+      .select("id, shop_id, priority, enabled, connection_status, couriers(provider,display_name)")
+      .in("shop_id", targetShopIds);
+
+    const configsByShop = new Map<string, CourierCandidateInfo[]>();
+    for (const c of configs || []) {
+      const provider = (c.couriers as any)?.provider;
+      const displayName = (c.couriers as any)?.display_name;
+      const item: CourierCandidateInfo = {
+        id: c.id,
+        provider,
+        displayName: displayName || provider?.toUpperCase(),
+        enabled: c.enabled,
+        priority: c.priority,
+        connectionStatus: c.connection_status
+      };
+      const list = configsByShop.get(c.shop_id) || [];
+      list.push(item);
+      configsByShop.set(c.shop_id, list);
+    }
+
     const dispatchService = new DispatchService();
 
     type OrderResult = {
@@ -114,6 +147,48 @@ export async function POST(request: NextRequest) {
           return { orderId, orderName: order.name, status: "failed", reason: "Missing phone number or delivery address" };
         }
 
+        // Per-order Courier & Pickup Location Resolution
+        const shop = shopConfigMap.get(order.shop_id);
+        const candidates = configsByShop.get(order.shop_id) || [];
+        const shippingRules = ((shop as any)?.shipping_rules || []) as ShippingRoutingRule[];
+
+        let chosenConfigId = input.courierConfigId;
+        let chosenPickupLocationId = input.pickupLocationId;
+
+        // If no explicit manual courier override, resolve automatically based on Inside/Outside Dhaka rules & shipping rules
+        if (!chosenConfigId) {
+          const resolved = resolveCourierForOrder(order, shippingRules, candidates);
+          if (resolved) {
+            chosenConfigId = resolved.courierConfigId;
+            chosenPickupLocationId = chosenPickupLocationId || resolved.pickupLocationId;
+          } else {
+            const firstEnabled = candidates.find((c) => c.enabled && c.connectionStatus === "connected");
+            if (firstEnabled) {
+              chosenConfigId = firstEnabled.id;
+            }
+          }
+        }
+
+        if (!chosenConfigId) {
+          return { 
+            orderId, 
+            orderName: order.name, 
+            status: "failed", 
+            reason: "No enabled and connected courier service available for this location" 
+          };
+        }
+
+        // If pickup location not specified, fetch default location for this courier
+        if (!chosenPickupLocationId) {
+          try {
+            const locData = await PickupLocationService.get(chosenConfigId, order.shop_id);
+            const defaultLoc = locData.locations?.find((l) => l.id === locData.defaultLocationId || l.isDefault) || locData.locations?.[0];
+            chosenPickupLocationId = defaultLoc?.id;
+          } catch {
+            // ignore error, will be validated in dispatch service
+          }
+        }
+
         // Claim dispatch lock idempotently via Supabase RPC
         const idempotencyKey = crypto.randomUUID();
         const { data: claim, error: claimError } = await supabase.rpc("claim_dispatch", {
@@ -128,8 +203,8 @@ export async function POST(request: NextRequest) {
         try {
           const execution = await dispatchService.execute(
             claim.id,
-            input.courierConfigId,
-            input.pickupLocationId,
+            chosenConfigId,
+            chosenPickupLocationId,
             user.id
           );
 

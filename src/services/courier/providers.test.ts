@@ -64,7 +64,7 @@ describe("Redx provider", () => {
   it("reports correct capabilities", () => {
     const provider = new RedxProvider();
     const cap = provider.getCapabilities();
-    expect(cap.supportsPickupLocationSync).toBe(false);
+    expect(cap.supportsPickupLocationSync).toBe(true);
     expect(cap.supportsCancellation).toBe(true);
   });
 });

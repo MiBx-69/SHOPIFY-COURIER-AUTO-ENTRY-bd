@@ -137,4 +137,24 @@ describe("resolveCourierForOrder", () => {
     expect(res?.provider).toBe("steadfast");
     expect(res?.courierConfigId).toBe("cfg_steadfast_3");
   });
+
+  it("accurately handles a mixed batch of inside and outside Dhaka orders independently", () => {
+    const orderInside = {
+      id: "ord_1",
+      shipping_address: { city: "Dhaka", address1: "Banani 11" }
+    };
+    const orderOutside = {
+      id: "ord_2",
+      shipping_address: { city: "Chattogram", address1: "Agrabad C/A" }
+    };
+
+    const resInside = resolveCourierForOrder(orderInside, rules, candidates);
+    const resOutside = resolveCourierForOrder(orderOutside, rules, candidates);
+
+    expect(resInside?.provider).toBe("redx");
+    expect(resInside?.courierConfigId).toBe("cfg_redx_1");
+
+    expect(resOutside?.provider).toBe("pathao");
+    expect(resOutside?.courierConfigId).toBe("cfg_pathao_2");
+  });
 });

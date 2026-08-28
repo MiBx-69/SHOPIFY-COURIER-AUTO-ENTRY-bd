@@ -137,6 +137,7 @@ const ORDERS_TABS = [
   { id: "all", label: "All Orders" },
   { id: "ready", label: "Ready to Dispatch" },
   { id: "preparing", label: "Preparing" },
+  { id: "on_hold", label: "On Hold" },
   { id: "unfulfilled", label: "Unfulfilled" },
   { id: "pending", label: "Pending Payment" },
   { id: "attention", label: "Attention Required" },
@@ -526,6 +527,7 @@ export function OrderList({
     selectedOrdersList.forEach((order) => {
       const issues: string[] = [];
       if (order.cancelled_at) issues.push("Order is cancelled in Shopify");
+      if (order.fulfillment_status === "ON_HOLD") issues.push("Order is on hold in Shopify");
       if (order.dispatch_status === "dispatched") issues.push("Already dispatched");
       if (!order.customer_phone) issues.push("Missing customer phone number");
       if (!order.shipping_address) issues.push("Missing delivery address");
@@ -611,23 +613,9 @@ export function OrderList({
       return;
     }
     
-    // For bulk, if all selected ready orders resolve to the same courier, use it. Otherwise leave blank for auto or use first.
-    let commonCourierId = "";
-    let firstLocId = "";
-    if (dispatchValidation.ready.length > 0) {
-      const firstRouted = resolveCourierForOrder(dispatchValidation.ready[0], shippingRules, candidateCouriers, courierPickupMap);
-      if (firstRouted && dispatchValidation.ready.every(o => resolveCourierForOrder(o, shippingRules, candidateCouriers, courierPickupMap)?.courierConfigId === firstRouted.courierConfigId)) {
-        commonCourierId = firstRouted.courierConfigId;
-        firstLocId = firstRouted.pickupLocationId || "";
-      }
-    }
-    
-    const initialCourierId = commonCourierId || availableCouriers[0]?.id || "";
-    setBulkCourierId(initialCourierId);
-
-    const locationsData = courierPickupMap[initialCourierId];
-    const defaultLoc = locationsData?.locations?.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || locationsData?.locations?.[0];
-    setBulkPickupLocationId(firstLocId || defaultLoc?.id || "");
+    // Default bulk dispatch to auto-route (value "") so each order is routed according to inside/outside Dhaka rules
+    setBulkCourierId("");
+    setBulkPickupLocationId("");
 
     setShowDispatchModal(true);
   }
@@ -666,6 +654,18 @@ export function OrderList({
       setSelected([]);
       queryClient.invalidateQueries({ queryKey: ["orders-list"] });
       queryClient.invalidateQueries({ queryKey: ["orders-counts", shopId] });
+
+      if (failedCount > 0) {
+        setNotice({ 
+          text: `Bulk dispatch completed: ${successCount} dispatched, ${failedCount} failed. Check the Attention Required tab to review issues.`, 
+          type: "error" 
+        });
+      } else {
+        setNotice({ 
+          text: `Successfully dispatched ${successCount} orders.`, 
+          type: "success" 
+        });
+      }
     } catch (err: unknown) {
       setNotice({ text: err instanceof Error ? err.message : "Bulk dispatch failed", type: "error" });
     } finally {
@@ -1885,10 +1885,11 @@ export function OrderList({
                 className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-900 focus:bg-white focus:outline-none"
               >
                 <option value="all">All Fulfillment Statuses</option>
+                <option value="preparing">Preparing</option>
                 <option value="unfulfilled">Unfulfilled</option>
-                <option value="fulfilled">Fulfilled</option>
                 <option value="on_hold">On Hold</option>
                 <option value="partially_fulfilled">Partially Fulfilled</option>
+                <option value="fulfilled">Fulfilled</option>
               </select>
             </div>
 
@@ -1976,6 +1977,35 @@ export function OrderList({
                   <span className="font-semibold text-slate-700">Estimated Total COD:</span>
                   <span className="font-bold text-slate-900 font-mono">{money(dispatchValidation.estimatedCodMinor, "BDT")}</span>
                 </div>
+
+                {/* Routing Breakdown Preview for Bulk */}
+                {(() => {
+                  if (singleDispatchOrder || bulkCourierId) return null;
+                  const breakdown: Record<string, number> = {};
+                  for (const o of dispatchValidation.ready) {
+                    const routed = resolveCourierForOrder(o, shippingRules, candidateCouriers, courierPickupMap);
+                    const name = routed?.courierName || availableCouriers[0]?.name || "Default Courier";
+                    breakdown[name] = (breakdown[name] || 0) + 1;
+                  }
+                  const entries = Object.entries(breakdown);
+                  if (entries.length === 0) return null;
+                  return (
+                    <div className="pt-2 border-t border-slate-200/80 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-bold text-slate-700">Automatic Routing Plan:</span>
+                        <span className="text-[10px] text-emerald-600 font-semibold">Zone & Method rules active</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {entries.map(([name, count]) => (
+                          <span key={name} className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[11px] font-bold text-slate-800 shadow-2xs">
+                            {name}: <span className="text-emerald-600 font-black">{count}</span> {count === 1 ? "order" : "orders"}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {dispatchValidation.needAttention.length > 0 && (
                   <p className="text-[11px] text-amber-700 bg-amber-50 p-2 rounded border border-amber-200">
                     ⚠ {dispatchValidation.needAttention.length} selected orders have missing details or are already dispatched and will be skipped.
@@ -1986,7 +2016,9 @@ export function OrderList({
 
             {/* Courier Selection */}
             <div className="space-y-1.5">
-              <label className="text-xs font-bold text-slate-800">Select Courier Service</label>
+              <label className="text-xs font-bold text-slate-800">
+                {singleDispatchOrder ? "Select Courier Service" : "Courier Routing Strategy"}
+              </label>
               <select
                 value={singleDispatchOrder ? singleDispatchCourierId : bulkCourierId}
                 onChange={(e) => {
@@ -1998,15 +2030,24 @@ export function OrderList({
                     setSingleDispatchPickupLocationId(defaultLoc?.id || "");
                   } else {
                     setBulkCourierId(val);
-                    const locationsData = courierPickupMap[val];
-                    const defaultLoc = locationsData?.locations?.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || locationsData?.locations?.[0];
-                    setBulkPickupLocationId(defaultLoc?.id || "");
+                    if (val) {
+                      const locationsData = courierPickupMap[val];
+                      const defaultLoc = locationsData?.locations?.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || locationsData?.locations?.[0];
+                      setBulkPickupLocationId(defaultLoc?.id || "");
+                    } else {
+                      setBulkPickupLocationId("");
+                    }
                   }
                 }}
-                className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                className="w-full h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 font-medium"
               >
+                {!singleDispatchOrder && (
+                  <option value="">⚡ Auto-route by Location & Shipping Rules (Recommended)</option>
+                )}
                 {availableCouriers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                  <option key={c.id} value={c.id}>
+                    {singleDispatchOrder ? c.name : `${c.name} (Override for all selected orders)`}
+                  </option>
                 ))}
               </select>
             </div>
@@ -2014,6 +2055,21 @@ export function OrderList({
             {/* Pickup Location Selection */}
             {(() => {
               const activeCourierId = singleDispatchOrder ? singleDispatchCourierId : bulkCourierId;
+              
+              if (!singleDispatchOrder && !bulkCourierId) {
+                return (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1">
+                      <MapPin size={12} className="text-slate-500" />
+                      <span>Pickup Warehouse / Branch</span>
+                    </label>
+                    <div className="w-full h-9 rounded-lg border border-slate-200 bg-slate-50 px-3 flex items-center text-xs text-slate-600 font-medium">
+                      ✓ Managed automatically by each courier&apos;s configured default pickup location
+                    </div>
+                  </div>
+                );
+              }
+
               const locationsData = courierPickupMap[activeCourierId];
               const locations = locationsData?.locations || [];
 
@@ -2070,6 +2126,7 @@ export function OrderList({
                 onClick={singleDispatchOrder ? executeSingleDispatch : executeBulkDispatch}
                 disabled={batchProcessing || (() => {
                   const activeCourierId = singleDispatchOrder ? singleDispatchCourierId : bulkCourierId;
+                  if (!singleDispatchOrder && !bulkCourierId) return false; // Auto-routing handles locations automatically
                   const locs = courierPickupMap[activeCourierId]?.locations || [];
                   const supported = courierPickupMap[activeCourierId]?.supported ?? true;
                   const selectedLoc = singleDispatchOrder ? singleDispatchPickupLocationId : bulkPickupLocationId;
@@ -2120,12 +2177,26 @@ export function OrderList({
               ))}
             </div>
 
-            <Button
-              onClick={() => setShowResultModal(false)}
-              className="w-full h-9 text-xs bg-slate-900 text-white font-bold"
-            >
-              Done
-            </Button>
+            <div className="flex items-center gap-2">
+              {bulkResults.summary.failed > 0 && (
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowResultModal(false);
+                    handleTabChange("attention");
+                  }}
+                  className="flex-1 h-9 text-xs border border-amber-300 text-amber-900 bg-amber-50 hover:bg-amber-100 font-bold cursor-pointer"
+                >
+                  View Attention Tab ({bulkResults.summary.failed})
+                </Button>
+              )}
+              <Button
+                onClick={() => setShowResultModal(false)}
+                className={cn("h-9 text-xs bg-slate-900 text-white font-bold cursor-pointer", bulkResults.summary.failed > 0 ? "flex-1" : "w-full")}
+              >
+                Done
+              </Button>
+            </div>
           </div>
         </div>
       )}

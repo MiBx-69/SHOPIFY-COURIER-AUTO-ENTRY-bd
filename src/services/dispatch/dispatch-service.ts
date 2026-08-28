@@ -266,29 +266,38 @@ export class DispatchService {
           }
         });
 
-        try { 
-          await updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), {
-            courier: selected.provider,
-            trackingId: result.trackingId,
-            reference: result.courierReference,
-            dispatchedAt: new Date().toISOString()
-          }); 
-          await createShopifyFulfillment(dispatch.shop_id, String(order.shopify_order_gid), {
-            company: selected.provider,
-            number: result.trackingId
-          });
-          await admin.from("dispatches").update({ 
-            phase: "completed", 
-            shopify_updated_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }).eq("id", dispatch.id); 
-        } catch { 
-          await admin.from("dispatches").update({ 
-            phase: "shopify_update_pending", 
-            safe_error_message: "Courier shipment created; Shopify update requires attention.",
-            updated_at: new Date().toISOString()
-          }).eq("id", dispatch.id); 
-        }
+        // Async non-blocking Shopify synchronization for faster dispatch response
+        (async () => {
+          try {
+            const results = await Promise.allSettled([
+              updateShopifyDispatchMetafields(dispatch.shop_id, String(order.shopify_order_gid), {
+                courier: selected.provider,
+                trackingId: result.trackingId,
+                reference: result.courierReference,
+                dispatchedAt: new Date().toISOString()
+              }),
+              createShopifyFulfillment(dispatch.shop_id, String(order.shopify_order_gid), {
+                company: selected.provider,
+                number: result.trackingId
+              })
+            ]);
+
+            const failed = results.some(r => r.status === "rejected");
+            await admin.from("dispatches").update({ 
+              phase: failed ? "shopify_update_pending" : "completed", 
+              safe_error_message: failed ? "Courier shipment created; Shopify update requires attention." : null,
+              shopify_updated_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }).eq("id", dispatch.id);
+          } catch (syncErr) {
+            console.error(`[SHOPIFY SYNC ERROR] dispatch_id=${dispatch.id}:`, syncErr);
+            await admin.from("dispatches").update({ 
+              phase: "shopify_update_pending", 
+              safe_error_message: "Courier shipment created; Shopify update requires attention.",
+              updated_at: new Date().toISOString()
+            }).eq("id", dispatch.id);
+          }
+        })();
 
         const { data: finalDispatch } = await admin.from("dispatches").select().eq("id", dispatch.id).single();
 
@@ -335,34 +344,34 @@ export class DispatchService {
     const shipment = shipments?.[0];
     const trackingId = dispatch.tracking_id || (shipment?.tracking_id as string);
     const courierConfig = dispatch.courier_configs as unknown as { id: string; couriers?: { provider: "redx"|"pathao"|"steadfast" } } | null;
+    let courierWarning: string | null = null;
 
     if (trackingId && courierConfig?.couriers?.provider) {
       const providerName = courierConfig.couriers.provider;
       const provider = courierRegistry.get(providerName);
 
       if (!provider.cancelShipment) {
-        // RedX does not support API cancellation. Bypass courier API and cancel locally.
+        // Provider does not support API cancellation (e.g. some courier endpoints)
         console.warn(`Courier cancellation is not supported for ${providerName.toUpperCase()} shipments. Proceeding with local cancellation.`);
+        courierWarning = `Courier ${providerName.toUpperCase()} API does not support remote cancellation`;
       } else {
         const { data: secret } = await admin
           .from("courier_secrets")
           .select("ciphertext,iv,auth_tag")
           .eq("courier_config_id", courierConfig.id)
-          .single();
+          .maybeSingle();
 
-        if (!secret) {
-          throw new Error("Courier credentials not found to cancel shipment");
-        }
-
-        const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
-        
-        try {
-          await provider.cancelShipment(trackingId, credentials);
-        } catch (courierErr) {
-          // If courier fails, we might still want to cancel locally? The user said "Cancel Dispatch MUST bypass...".
-          // If the provider supports it but it fails, we throw to avoid desync, unless the user forces it.
-          // But for now, we just throw if the API call fails.
-          throw courierErr;
+        if (secret) {
+          try {
+            const credentials = decryptSecret({ ciphertext: secret.ciphertext, iv: secret.iv, authTag: secret.auth_tag });
+            await provider.cancelShipment(trackingId, credentials);
+          } catch (courierErr) {
+            const errMsg = courierErr instanceof Error ? courierErr.message : "Courier API error during cancellation";
+            console.warn(`[COURIER CANCEL WARNING] ${providerName.toUpperCase()}: ${errMsg}`);
+            courierWarning = errMsg;
+          }
+        } else {
+          courierWarning = "Courier credentials not found; cancelled locally";
         }
       }
 
@@ -372,7 +381,7 @@ export class DispatchService {
           shipment_id: shipment.id as string,
           shop_id: dispatch.shop_id,
           status: "cancelled",
-          message: "Shipment cancelled by user request",
+          message: courierWarning ? `Cancelled locally: ${courierWarning}` : "Shipment cancelled by user request",
           occurred_at: new Date().toISOString()
         });
       }
@@ -381,7 +390,7 @@ export class DispatchService {
     await admin.from("dispatches").update({
       status: "cancelled",
       courier_status: "cancelled",
-      safe_error_message: reason ? `Cancelled: ${reason}` : "Dispatch cancelled",
+      safe_error_message: reason ? `Cancelled: ${reason}` : (courierWarning ? `Cancelled: ${courierWarning}` : "Dispatch cancelled"),
       updated_at: new Date().toISOString()
     }).eq("id", dispatch.id);
 
@@ -391,10 +400,19 @@ export class DispatchService {
       shop_id: dispatch.shop_id,
       order_id: dispatch.order_id,
       event_type: "dispatch_cancelled",
-      payload: { reason: reason || "Dispatch cancelled", actor_id: actorId, cancelled_at: new Date().toISOString() }
+      payload: { 
+        reason: reason || "Dispatch cancelled", 
+        actor_id: actorId, 
+        courier_warning: courierWarning,
+        cancelled_at: new Date().toISOString() 
+      }
     });
 
-    return { success: true, message: "Dispatch cancelled successfully" };
+    const msg = courierWarning 
+      ? `Dispatch cancelled locally (${courierWarning})` 
+      : "Dispatch cancelled successfully";
+
+    return { success: true, message: msg };
   }
 
   private async fail(dispatch: { id: string; order_id: string }, message: string): Promise<DispatchExecutionResult> {
