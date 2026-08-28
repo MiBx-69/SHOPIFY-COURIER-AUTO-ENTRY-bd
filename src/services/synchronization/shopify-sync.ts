@@ -98,8 +98,16 @@ export class ShopifySyncService {
       const batchSize = 10;
       for (let i = 0; i < result.orders.nodes.length; i += batchSize) {
         const chunk = result.orders.nodes.slice(i, i + batchSize);
-        await Promise.all(chunk.map((order) => this.upsertOrder(shopId, order)));
-        synchronized += chunk.length;
+        await Promise.all(
+          chunk.map(async (order) => {
+            try {
+              await this.upsertOrder(shopId, order);
+              synchronized += 1;
+            } catch (err: any) {
+              console.warn(`[ShopifySync] Skipping problematic order ${order.name}:`, err?.message || err);
+            }
+          })
+        );
       }
 
       cursor = result.orders.pageInfo.hasNextPage ? result.orders.pageInfo.endCursor : null;
@@ -175,7 +183,9 @@ export class ShopifySyncService {
       { ...row, changed_after_dispatch: existing?.dispatch_status === "dispatched" && existing.shopify_updated_at !== source.updatedAt },
       { onConflict: "shop_id,shopify_order_id" }
     ).select("id").single();
-    if (error || !order) throw new Error("Unable to store Shopify order");
+    if (error || !order) {
+      throw new Error(`DB upsert error for order ${source.name}: ${error?.message || "record not returned"}`);
+    }
 
     const { error: deleteError } = await admin.from("order_line_items").delete().eq("order_id", order.id);
     if (deleteError) throw deleteError;
