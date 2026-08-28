@@ -6,7 +6,7 @@ export async function POST(request: NextRequest) {
     const shopId = request.nextUrl.searchParams.get("shopId");
     if (!shopId) return NextResponse.json({ error: "shopId is required" }, { status: 400 });
     
-    await requireShopPermission(shopId, "manage_shopify");
+    await requireShopPermission(shopId, "view_orders");
     
     // Check if this is the first sync
     const { createAdminClient } = await import("@/lib/supabase/admin");

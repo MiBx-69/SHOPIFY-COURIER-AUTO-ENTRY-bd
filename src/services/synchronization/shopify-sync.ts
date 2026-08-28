@@ -57,7 +57,10 @@ export class ShopifySyncService {
 
   async syncProducts(_shopId: string) { /* Historical order snapshots intentionally eliminate product lookup dependency. */ }
   async syncFulfillment(shopId: string, gid: string) { await this.syncOrder(shopId, gid); }
-  async reconcile(shopId: string) { return this.syncOrders(shopId, `updated_at:>=${new Date(Date.now() - 48 * 3600_000).toISOString().slice(0,10)}`); }
+  async reconcile(shopId: string) { 
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600_000).toISOString().slice(0, 10);
+    return this.syncOrders(shopId, `updated_at:>=${thirtyDaysAgo}`); 
+  }
 
   private async upsertOrder(shopId: string, source: ShopifyOrder) {
     const admin = createAdminClient();
