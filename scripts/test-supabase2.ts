@@ -9,8 +9,8 @@ const supabase = createClient(
 );
 
 async function check() {
-  const { data: cols, error: err2 } = await supabase.from('shops').select('*').limit(1);
-  console.log("Columns:", cols ? Object.keys(cols[0]) : null);
+  const { data, error } = await supabase.rpc('get_order_counts' as any, { shop_id: '2c0a237b-815e-4c32-981b-ba0a038fe1ff' });
+  console.log("RPC Test:", data, error);
 }
 
 check();
