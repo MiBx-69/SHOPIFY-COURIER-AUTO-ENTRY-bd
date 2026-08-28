@@ -146,9 +146,11 @@ export class RedxProvider implements CourierProvider {
     const stores = (data as { pickup_stores?: Array<any> }).pickup_stores || [];
     return stores.map((s) => ({
       id: String(s.id),
+      courierLocationId: String(s.id),
       name: s.name,
       address: s.address,
-      areaId: String(s.area_id)
+      areaId: String(s.area_id),
+      isActive: true
     }));
   }
 
