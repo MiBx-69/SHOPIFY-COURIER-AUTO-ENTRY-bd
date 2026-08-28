@@ -1,0 +1,1 @@
+import { createAdminClient } from "../src/lib/supabase/admin"; async function run() { const admin = createAdminClient(); const { data, error } = await admin.rpc("get_schema_migrations").select("*"); console.log("Migrations:", data, error); } run().catch(console.error);

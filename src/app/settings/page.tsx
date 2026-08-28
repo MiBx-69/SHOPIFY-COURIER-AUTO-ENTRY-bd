@@ -53,7 +53,7 @@ export default async function SettingsPage({
   if (orgIds.length > 0) {
     const { data: dbShops } = await admin
       .from("shops")
-      .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,shipping_rules,redispatch_settings,organization_id")
+      .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,organization_id")
       .in("organization_id", orgIds)
       .order("name");
     shops = dbShops || [];
@@ -63,7 +63,7 @@ export default async function SettingsPage({
   if (shops.length === 0) {
     const { data: allShops } = await admin
       .from("shops")
-      .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,shipping_rules,redispatch_settings,organization_id")
+      .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,organization_id")
       .order("name")
       .limit(5);
 
