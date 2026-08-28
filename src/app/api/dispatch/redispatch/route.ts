@@ -111,7 +111,7 @@ export async function POST(request: NextRequest) {
 
       const shop = shopMap.get(order.shop_id);
       const candidates = configsByShop.get(order.shop_id) || [];
-      const shippingRules = (shop?.shipping_rules || []) as ShippingRoutingRule[];
+      const shippingRules = ((shop as any)?.shipping_rules || []) as ShippingRoutingRule[];
 
       let chosenConfigId = body.courierConfigId;
       let chosenPickupLocationId = body.pickupLocationId;
