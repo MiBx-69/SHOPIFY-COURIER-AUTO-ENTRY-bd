@@ -25,7 +25,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   if (orgIds.length > 0) {
     const { data: dbShops } = await admin
       .from("shops")
-      .select("id,name,shop_domain,automatic_courier")
+      .select("id,name,shop_domain,automatic_courier,shipping_rules,redispatch_settings")
       .in("organization_id", orgIds)
       .order("name");
     shops = dbShops || [];
@@ -35,7 +35,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   if (shops.length === 0) {
     const { data: allShops } = await admin
       .from("shops")
-      .select("id,name,shop_domain,automatic_courier,organization_id")
+      .select("id,name,shop_domain,automatic_courier,organization_id,shipping_rules,redispatch_settings")
       .order("name")
       .limit(5);
 
