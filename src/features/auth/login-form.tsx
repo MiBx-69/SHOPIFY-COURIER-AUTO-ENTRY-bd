@@ -87,22 +87,24 @@ export function LoginForm() {
     setInfoNotice(null);
 
     try {
-      const { data, error: err } = await createClient().auth.signInWithPassword({ email, password });
-      if (err) {
-        setError(
-          err.message === "Invalid login credentials"
-            ? "Incorrect email or password. Please try again."
-            : err.message
-        );
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: email.trim(), password })
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || !data.success) {
+        setError(data.error || "Incorrect email or password. Please try again.");
         setBusy(false);
-      } else if (data?.session || data?.user) {
-        window.location.href = "/orders";
-      } else {
-        window.location.href = "/orders";
+        return;
       }
+
+      window.location.href = "/orders";
     } catch (err: any) {
       console.error("Sign in error:", err);
-      setError(err?.message || "An unexpected error occurred during sign in. Please try again.");
+      setError(err?.message || "Network error during sign in. Please try again.");
       setBusy(false);
     }
   }
