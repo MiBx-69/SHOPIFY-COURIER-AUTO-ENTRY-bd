@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Settings } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { OrderList } from "@/features/orders/order-list";
 
 export const metadata = { title: "Orders | MiBx-Dispatch" };
@@ -18,7 +19,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     .select("organization_id")
     .eq("user_id", user.id);
 
-  const orgIds = (userMemberships || []).map((m) => m.organization_id);
+  const orgIds = (userMemberships || []).map((m: { organization_id: string }) => m.organization_id);
 
   let shops: any[] = [];
   if (orgIds.length > 0) {
