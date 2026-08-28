@@ -5,7 +5,11 @@ const redisUrl = process.env.UPSTASH_REDIS_REST_URL || "";
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || "";
 
 export const redis: Redis | null = redisUrl && redisToken
-  ? new Redis({ url: redisUrl, token: redisToken })
+  ? new Redis({ 
+      url: redisUrl, 
+      token: redisToken,
+      retry: { retries: 1, backoff: (retryCount) => Math.exp(retryCount) * 50 }
+    })
   : null;
 
 if (!redis) {
