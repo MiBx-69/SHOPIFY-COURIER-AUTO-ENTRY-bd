@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Settings } from "lucide-react";
@@ -5,6 +6,7 @@ import { AppShell } from "@/components/app-shell";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { OrderList } from "@/features/orders/order-list";
+import { OrderListSkeleton } from "@/components/ui/skeleton";
 
 export const metadata = { title: "Dispatched | MiBx-Dispatch" };
 
@@ -55,7 +57,7 @@ export default async function DispatchedPage({ searchParams }: { searchParams: P
 
   let couriers: Array<{ id: string; name: string; provider?: string }> = [];
   if (shop) {
-    const { data: configs } = await supabase
+    const { data: configs } = await admin
       .from("courier_configs")
       .select("id,couriers(provider,display_name)")
       .eq("shop_id", shop.id)
@@ -74,7 +76,7 @@ export default async function DispatchedPage({ searchParams }: { searchParams: P
         <div className="flex items-center gap-2">
           <h1 className="text-lg font-bold tracking-tight text-slate-900">Dispatched</h1>
           {shop && (
-            <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            <span className="hidden sm:inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
               {shop.name}
             </span>
           )}
@@ -103,15 +105,17 @@ export default async function DispatchedPage({ searchParams }: { searchParams: P
       </div>
 
       {shop ? (
-        <OrderList 
-          shopId={shop.id} 
-          mode="dispatched"
-          initialStatus="dispatched" 
-          availableCouriers={couriers}
-          automaticCourier={Boolean(shop.automatic_courier)}
-          shippingRules={(shop as any).shipping_rules}
-          redispatchSettings={(shop as any).redispatch_settings}
-        />
+        <Suspense fallback={<OrderListSkeleton />}>
+          <OrderList 
+            shopId={shop.id} 
+            mode="dispatched"
+            initialStatus="dispatched" 
+            availableCouriers={couriers}
+            automaticCourier={Boolean(shop.automatic_courier)}
+            shippingRules={(shop as any).shipping_rules}
+            redispatchSettings={(shop as any).redispatch_settings}
+          />
+        </Suspense>
       ) : (
         <div className="rounded-lg bg-white p-8 text-center border border-slate-200 shadow-2xs">
           <h2 className="font-semibold text-sm text-slate-900">Connect a Shopify store</h2>

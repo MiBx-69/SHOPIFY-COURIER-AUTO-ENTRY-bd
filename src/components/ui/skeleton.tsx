@@ -58,10 +58,23 @@ export function OrderTableRowSkeleton() {
 
 export function OrderListSkeleton({ count = 8 }: { count?: number }) {
   return (
-    <div className="space-y-2 md:hidden">
-      {Array.from({ length: count }).map((_, i) => (
-        <OrderCardSkeleton key={i} />
-      ))}
+    <div className="space-y-4">
+      {/* Mobile view */}
+      <div className="space-y-2 md:hidden">
+        {Array.from({ length: count }).map((_, i) => (
+          <OrderCardSkeleton key={i} />
+        ))}
+      </div>
+      {/* Desktop view */}
+      <div className="hidden md:block rounded-xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+        <table className="w-full text-left">
+          <tbody className="divide-y divide-slate-100">
+            {Array.from({ length: count }).map((_, i) => (
+              <OrderTableRowSkeleton key={i} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
