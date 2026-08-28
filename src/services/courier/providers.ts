@@ -102,9 +102,9 @@ export class RedxProvider implements CourierProvider {
 
   getCapabilities() {
     return {
-      supportsPickupLocations: false,
+      supportsPickupLocations: true,
       supportsPerShipmentPickupLocation: false,
-      supportsPickupLocationSync: false,
+      supportsPickupLocationSync: true,
       supportsCancellation: true
     };
   }
@@ -118,21 +118,38 @@ export class RedxProvider implements CourierProvider {
     this.validateConfig(c);
     const token = redxToken(c.apiToken);
     
-    // Test connection by subscribing
-    const { response, data } = await courierFetch(`${this.baseUrl(c)}/no-area-parcels/subscribe`, {
-      method: "POST",
+    // Test connection by fetching pickup stores
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/pickup/stores`, {
+      method: "GET",
       headers: { "API-ACCESS-TOKEN": token, "Content-Type": "application/json" }
     });
 
     if (!response.ok) {
-      const err = (data as { message?: string })?.message || "REDX subscription/test failed";
+      const err = (data as { message?: string })?.message || "REDX authentication failed. Invalid token.";
       throw new Error(err);
     }
   }
 
-  async getPickupLocations(_c: CourierCredentials): Promise<PickupLocation[]> {
-    // RedX production payload no longer supports pickup locations (no-area-parcels).
-    return [];
+  async getPickupLocations(c: CourierCredentials): Promise<PickupLocation[]> {
+    this.validateConfig(c);
+    const token = redxToken(c.apiToken);
+
+    const { response, data } = await courierFetch(`${this.baseUrl(c)}/pickup/stores`, {
+      method: "GET",
+      headers: { "API-ACCESS-TOKEN": token, "Content-Type": "application/json" }
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch REDX pickup stores.");
+    }
+
+    const stores = (data as { pickup_stores?: Array<any> }).pickup_stores || [];
+    return stores.map((s) => ({
+      id: String(s.id),
+      name: s.name,
+      address: s.address,
+      areaId: String(s.area_id)
+    }));
   }
 
   async createShipment(p: NormalizedShipment, c: Record<string, string>, key: string): Promise<CourierResult> {
@@ -158,7 +175,7 @@ export class RedxProvider implements CourierProvider {
       const instruction = c.defaultInstruction || p.notes || "";
 
       // Exactly the specified payload
-      const payload = {
+      const payload: Record<string, any> = {
         customer_name: p.customerName || "Customer",
         customer_phone: phone,
         customer_address: address,
@@ -168,6 +185,10 @@ export class RedxProvider implements CourierProvider {
         instruction: instruction,
         value: codAmount > 0 ? codAmount : 500
       };
+
+      if (p.pickupLocationId) {
+        payload.pickup_store_id = Number(p.pickupLocationId);
+      }
 
       const { response, data } = await courierFetch(`${this.baseUrl(c)}/no-area-parcels`, {
         method: "POST",
