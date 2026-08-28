@@ -92,10 +92,57 @@ export async function createShopifyFulfillment(shopId: string, orderGid: string,
 }
 
 export async function registerShopifyWebhooks(shopId: string) {
-  const callback = `${serverEnv().SHOPIFY_APP_URL}/api/webhooks/shopify`;
-  const topics = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDERS_CANCELLED", "ORDERS_FULFILLED", "FULFILLMENTS_CREATE", "FULFILLMENTS_UPDATE", "PRODUCTS_UPDATE", "PRODUCTS_DELETE", "APP_UNINSTALLED"];
-  for (const topic of topics) {
-    const data = await shopifyGraphql<{ webhookSubscriptionCreate: { userErrors: Array<{ message: string }> } }>(shopId, `mutation Subscribe($topic:WebhookSubscriptionTopic!, $input:WebhookSubscriptionInput!) { webhookSubscriptionCreate(topic:$topic, webhookSubscription:$input) { userErrors { message } } }`, { topic, input: { uri: callback } });
-    if (data.webhookSubscriptionCreate.userErrors.length) throw new Error(data.webhookSubscriptionCreate.userErrors[0].message);
-  }
+  const appUrl = (serverEnv().SHOPIFY_APP_URL || "").replace(/\/+$/, "");
+  const callback = `${appUrl}/api/webhooks/shopify`;
+  const topics = [
+    "ORDERS_CREATE",
+    "ORDERS_UPDATED",
+    "ORDERS_CANCELLED",
+    "ORDERS_FULFILLED",
+    "FULFILLMENTS_CREATE",
+    "FULFILLMENTS_UPDATE",
+    "PRODUCTS_UPDATE",
+    "PRODUCTS_DELETE",
+    "APP_UNINSTALLED"
+  ];
+
+  await Promise.allSettled(
+    topics.map(async (topic) => {
+      try {
+        const data = await shopifyGraphql<{
+          webhookSubscriptionCreate: {
+            userErrors: Array<{ message: string; field?: string[] }>;
+          };
+        }>(
+          shopId,
+          `mutation Subscribe($topic: WebhookSubscriptionTopic!, $input: WebhookSubscriptionInput!) {
+            webhookSubscriptionCreate(topic: $topic, webhookSubscription: $input) {
+              userErrors {
+                message
+                field
+              }
+            }
+          }`,
+          { topic, input: { uri: callback } }
+        );
+
+        if (data.webhookSubscriptionCreate?.userErrors?.length) {
+          const errMsg = data.webhookSubscriptionCreate.userErrors[0].message;
+          if (
+            errMsg.toLowerCase().includes("taken") ||
+            errMsg.toLowerCase().includes("already") ||
+            errMsg.toLowerCase().includes("exists")
+          ) {
+            console.info(`[WEBHOOK REGISTER] Topic ${topic} is already registered on Shopify.`);
+            return;
+          }
+          console.warn(`[WEBHOOK REGISTER] Topic ${topic} returned user error:`, errMsg);
+        } else {
+          console.info(`[WEBHOOK REGISTER] Topic ${topic} registered successfully.`);
+        }
+      } catch (err) {
+        console.warn(`[WEBHOOK REGISTER] Non-fatal error registering topic ${topic}:`, err instanceof Error ? err.message : err);
+      }
+    })
+  );
 }

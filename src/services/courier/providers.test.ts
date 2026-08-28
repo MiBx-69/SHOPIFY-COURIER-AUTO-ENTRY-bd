@@ -39,39 +39,33 @@ describe("Steadfast provider", () => {
     expect(result.outcome).toBe("unknown");
   });
 
-  it("returns registered primary pickup location", async () => {
+  it("reports correct capabilities", () => {
     const provider = new SteadfastProvider();
-    const locations = await provider.getPickupLocations({
-      apiKey: "key",
-      secretKey: "secret",
-      baseUrl: "https://courier.test",
-      senderName: "My Merchant",
-      pickupAddress: "Mirpur, Dhaka"
-    });
-    expect(locations.length).toBeGreaterThan(0);
-    expect(locations[0].name).toBe("My Merchant Warehouse");
-    expect(locations[0].address).toBe("Mirpur, Dhaka");
+    const cap = provider.getCapabilities();
+    expect(cap.supportsPickupLocationSync).toBe(false);
+    expect(cap.supportsCancellation).toBe(false);
   });
 });
 
 describe("Redx provider", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("tests connection against areas endpoint with Bearer token", async () => {
+  it("tests connection with API-ACCESS-TOKEN header", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ areas: [{ id: 1, name: "Uttara" }] }), { status: 200 })
+        new Response(JSON.stringify({ message: "Subscribed" }), { status: 200 })
       )
     );
     const provider = new RedxProvider();
     await expect(provider.testConnection({ apiToken: "test-token" })).resolves.toBeUndefined();
   });
 
-  it("fetches pickup stores", async () => {
+  it("reports correct capabilities", () => {
     const provider = new RedxProvider();
-    const locs = await provider.getPickupLocations({ apiToken: "test-token" });
-    expect(locs[0].name).toBe("Main Warehouse");
+    const cap = provider.getCapabilities();
+    expect(cap.supportsPickupLocationSync).toBe(false);
+    expect(cap.supportsCancellation).toBe(true);
   });
 });
 
