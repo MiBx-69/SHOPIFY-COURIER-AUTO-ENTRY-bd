@@ -447,3 +447,5 @@ Thumbs.db
 # Local machine metadata
 .machine/
 .local/test-sync.ts
+.vercel
+.env*
