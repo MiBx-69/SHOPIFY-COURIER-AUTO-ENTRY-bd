@@ -2,9 +2,74 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { shopifyGraphql } from "@/services/shopify/client";
 import { redis } from "@/lib/redis";
 
-type ShopifyOrder = { id: string; legacyResourceId: string; name: string; email: string | null; phone: string | null; displayFinancialStatus: string; displayFulfillmentStatus: string; cancelledAt: string | null; closedAt: string | null; createdAt: string; updatedAt: string; note: string | null; currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; currentTotalDiscountsSet: { shopMoney: { amount: string } }; currentShippingPriceSet: { shopMoney: { amount: string } }; currentTotalTaxSet: { shopMoney: { amount: string } }; currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; shippingLines?: { nodes: Array<{ title: string; code?: string | null; originalPriceSet?: { shopMoney: { amount: string; currencyCode: string } } }> }; shippingAddress: Record<string,string> | null; billingAddress: Record<string,string> | null; lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; originalTotalSet: { shopMoney: { amount: string } }; product: { id: string } | null; variant: { id: string } | null }> }; fulfillmentOrders?: { nodes: Array<{ status: string }> } };
+export type ShopifyOrder = { 
+  id: string; 
+  legacyResourceId: string; 
+  name: string; 
+  email: string | null; 
+  phone: string | null; 
+  displayFinancialStatus: string; 
+  displayFulfillmentStatus: string; 
+  cancelledAt: string | null; 
+  closedAt: string | null; 
+  createdAt: string; 
+  updatedAt: string; 
+  note: string | null; 
+  currentSubtotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; 
+  currentTotalDiscountsSet: { shopMoney: { amount: string } }; 
+  currentShippingPriceSet: { shopMoney: { amount: string } }; 
+  currentTotalTaxSet: { shopMoney: { amount: string } }; 
+  currentTotalPriceSet: { shopMoney: { amount: string; currencyCode: string } }; 
+  shippingLines?: { nodes: Array<{ title: string; code?: string | null; originalPriceSet?: { shopMoney: { amount: string; currencyCode: string } } }> }; 
+  shippingAddress: Record<string,string> | null; 
+  billingAddress: Record<string,string> | null; 
+  lineItems: { nodes: Array<{ id: string; title: string; variantTitle: string | null; sku: string | null; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string } }; originalTotalSet: { shopMoney: { amount: string } }; product: { id: string } | null; variant: { id: string } | null }> }; 
+  fulfillmentOrders?: { 
+    nodes: Array<{ 
+      id: string;
+      status: string; 
+      requestStatus?: string;
+      fulfillmentHolds?: Array<{ reason?: string; reasonNotes?: string }>;
+    }> 
+  }; 
+};
+
 const minor = (amount: string) => Math.round(Number(amount) * 100);
-const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingLines(first:5) { nodes { title code originalPriceSet { shopMoney { amount currencyCode } } } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } } fulfillmentOrders(first:10) { nodes { status } }`;
+
+const orderFragment = `id legacyResourceId name email phone displayFinancialStatus displayFulfillmentStatus cancelledAt closedAt createdAt updatedAt note currentSubtotalPriceSet { shopMoney { amount currencyCode } } currentTotalDiscountsSet { shopMoney { amount } } currentShippingPriceSet { shopMoney { amount } } currentTotalTaxSet { shopMoney { amount } } currentTotalPriceSet { shopMoney { amount currencyCode } } shippingLines(first:5) { nodes { title code originalPriceSet { shopMoney { amount currencyCode } } } } shippingAddress { name address1 address2 city province zip country phone } billingAddress { name address1 address2 city province zip country phone } lineItems(first:250) { nodes { id title variantTitle sku quantity originalUnitPriceSet { shopMoney { amount } } originalTotalSet { shopMoney { amount } } product { id } variant { id image { url altText } } } } fulfillmentOrders(first:10) { nodes { id status requestStatus fulfillmentHolds { reason reasonNotes } } }`;
+
+export function resolveFulfillmentStatus(source: ShopifyOrder): string {
+  const displayStatus = (source.displayFulfillmentStatus || "UNFULFILLED").toUpperCase().trim();
+  const fulfillmentOrderNodes = source.fulfillmentOrders?.nodes || [];
+
+  // 1. Explicit On Hold checks (Shopify order display status or fulfillment order holds)
+  const isHeld =
+    displayStatus === "ON_HOLD" ||
+    fulfillmentOrderNodes.some(
+      (fo) => fo.status === "ON_HOLD" || (fo.fulfillmentHolds && fo.fulfillmentHolds.length > 0)
+    );
+  if (isHeld) return "ON_HOLD";
+
+  // 2. In Progress / Preparing checks
+  const isInProgress =
+    displayStatus === "IN_PROGRESS" ||
+    fulfillmentOrderNodes.some((fo) => fo.status === "IN_PROGRESS");
+  if (isInProgress) return "IN_PROGRESS";
+
+  // 3. Directly mapped statuses
+  if (displayStatus === "FULFILLED") return "FULFILLED";
+  if (displayStatus === "PARTIALLY_FULFILLED") return "PARTIALLY_FULFILLED";
+  if (displayStatus === "RESTOCKED") return "RESTOCKED";
+  if (displayStatus === "SCHEDULED") return "SCHEDULED";
+  if (displayStatus === "REQUEST_DECLINED") return "REQUEST_DECLINED";
+
+  // 4. Voided / Cancelled orders without items to fulfill
+  if (source.cancelledAt || source.displayFinancialStatus?.toUpperCase() === "VOIDED") {
+    return "CANCELLED";
+  }
+
+  return "UNFULFILLED";
+}
 
 type OrderPage = {
   orders: { nodes: ShopifyOrder[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
@@ -88,16 +153,7 @@ export class ShopifySyncService {
       total_minor: minor(source.currentTotalPriceSet.shopMoney.amount),
       currency: source.currentTotalPriceSet.shopMoney.currencyCode,
       financial_status: source.displayFinancialStatus,
-      fulfillment_status: (
-        source.displayFulfillmentStatus === "ON_HOLD" || source.fulfillmentOrders?.nodes.some(fo => fo.status === "ON_HOLD")
-          ? "ON_HOLD"
-          : (
-              source.displayFulfillmentStatus === "IN_PROGRESS" ||
-              (source.displayFulfillmentStatus === "UNFULFILLED" && source.fulfillmentOrders?.nodes.some(fo => fo.status === "IN_PROGRESS" || fo.status === "OPEN"))
-            )
-            ? "IN_PROGRESS"
-            : source.displayFulfillmentStatus
-      ),
+      fulfillment_status: resolveFulfillmentStatus(source),
       cancelled_at: source.cancelledAt,
       closed_at: source.closedAt,
       shopify_created_at: source.createdAt,

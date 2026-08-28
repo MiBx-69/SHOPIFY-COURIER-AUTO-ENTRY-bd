@@ -56,12 +56,11 @@ export function LoginForm() {
           setError(msg || "Passkey verification failed. Please try again or use your password.");
         }
       } else if (data?.session || data?.user) {
-        router.push("/orders");
-        router.refresh();
+        window.location.href = "/orders";
+        return;
       } else {
-        // Successful verification check
-        router.push("/orders");
-        router.refresh();
+        window.location.href = "/orders";
+        return;
       }
     } catch (err: unknown) {
       const errorObj = err as Error;
@@ -87,18 +86,25 @@ export function LoginForm() {
     setError(null);
     setInfoNotice(null);
 
-    const { error: err } = await createClient().auth.signInWithPassword({ email, password });
-    if (err) {
-      setError(
-        err.message === "Invalid login credentials"
-          ? "Incorrect email or password. Please try again."
-          : err.message
-      );
-    } else {
-      router.push("/orders");
-      router.refresh();
+    try {
+      const { data, error: err } = await createClient().auth.signInWithPassword({ email, password });
+      if (err) {
+        setError(
+          err.message === "Invalid login credentials"
+            ? "Incorrect email or password. Please try again."
+            : err.message
+        );
+        setBusy(false);
+      } else if (data?.session || data?.user) {
+        window.location.href = "/orders";
+      } else {
+        window.location.href = "/orders";
+      }
+    } catch (err: any) {
+      console.error("Sign in error:", err);
+      setError(err?.message || "An unexpected error occurred during sign in. Please try again.");
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   // ── Forgot password ────────────────────────────────────────────────────────
