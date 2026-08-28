@@ -34,6 +34,41 @@ export async function PATCH(request: NextRequest) {
       courierRegistry.get(courier.provider).validateConfig(input.credentials);
     }
 
+    // Determine priority
+    let finalPriority = input.priority;
+    if (finalPriority !== undefined) {
+      // Check if priority already exists for another courier
+      const { data: existing } = await admin
+        .from("courier_configs")
+        .select("id")
+        .eq("shop_id", shopId)
+        .eq("priority", finalPriority)
+        .neq("courier_id", input.courierId)
+        .maybeSingle();
+      
+      if (existing) {
+        // Find max priority and add 1
+        const { data: maxPri } = await admin
+          .from("courier_configs")
+          .select("priority")
+          .eq("shop_id", shopId)
+          .order("priority", { ascending: false })
+          .limit(1)
+          .single();
+        finalPriority = (maxPri?.priority || 0) + 1;
+      }
+    } else {
+      // If no priority provided, put at the end
+      const { data: maxPri } = await admin
+        .from("courier_configs")
+        .select("priority")
+        .eq("shop_id", shopId)
+        .order("priority", { ascending: false })
+        .limit(1)
+        .single();
+      finalPriority = (maxPri?.priority || 0) + 1;
+    }
+
     const { data: config, error } = await admin
       .from("courier_configs")
       .upsert(
@@ -41,7 +76,7 @@ export async function PATCH(request: NextRequest) {
           shop_id: shopId,
           courier_id: input.courierId,
           enabled: input.enabled,
-          priority: input.priority,
+          priority: finalPriority,
           // Reset health when credentials change so user must re-test
           ...(input.credentials && {
             credentials_last_updated_at: new Date().toISOString(),
