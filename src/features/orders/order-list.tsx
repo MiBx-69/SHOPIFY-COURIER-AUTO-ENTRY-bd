@@ -550,7 +550,7 @@ export function OrderList({
     setSingleDispatchOrder(order);
     
     // Resolve courier from rules
-    const routedCourier = null;
+    const routedCourier = {} as any;
     const initialCourierId = undefined || availableCouriers[0]?.id || "";
     setSingleDispatchCourierId(initialCourierId);
 
@@ -1274,7 +1274,7 @@ export function OrderList({
 
                 const shippingTitle = order.shipping_title || order.shipping_lines?.[0]?.title || null;
                 const zoneInfo = { zoneLabel: "Standard Delivery", destinationSummary: "Standard Delivery", zone: "unknown" };
-                const routedCourier = null;
+                const routedCourier = {} as any;
 
                 return (
                   <tr 
@@ -1549,7 +1549,7 @@ export function OrderList({
 
             const shippingTitle = order.shipping_title || order.shipping_lines?.[0]?.title || null;
             const zoneInfo = { zoneLabel: "Standard Delivery", destinationSummary: "Standard Delivery", zone: "unknown" };
-            const routedCourier = null;
+            const routedCourier = {} as any;
 
             return (
               <div 
@@ -1997,7 +1997,7 @@ export function OrderList({
                   if (singleDispatchOrder || bulkCourierId) return null;
                   const breakdown: Record<string, number> = {};
                   for (const o of dispatchValidation.ready) {
-                    const routed = null;
+                    const routed = {} as any;
                     const name = undefined || availableCouriers[0]?.name || "Default Courier";
                     breakdown[name] = (breakdown[name] || 0) + 1;
                   }
