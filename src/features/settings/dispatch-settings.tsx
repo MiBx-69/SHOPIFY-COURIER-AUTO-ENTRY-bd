@@ -17,7 +17,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ShippingRoutingRule, RedispatchSettings } from "@/services/courier/routing";
+type RedispatchSettings = { auto_restore: boolean; one_click_instant: boolean; };
 import { cn } from "@/lib/utils";
 
 type CourierConfig = {
@@ -52,7 +52,7 @@ export function DispatchSettings({
   initialShippingRules = [],
   initialRedispatchSettings = {
     auto_restore: true,
-    use_shipping_rules: true,
+    
     one_click_instant: true
   },
   configs
@@ -111,7 +111,7 @@ export function DispatchSettings({
   const [redispatchSettings, setRedispatchSettings] = useState<RedispatchSettings>(
     initialRedispatchSettings || {
       auto_restore: true,
-      use_shipping_rules: true,
+      
       one_click_instant: true
     }
   );
@@ -489,7 +489,7 @@ export function DispatchSettings({
             </div>
             <button
               type="button"
-              onClick={() => setRedispatchSettings(s => ({ ...s, one_click_instant: !s.one_click_instant }))}
+              onClick={() => setRedispatchSettings((s: RedispatchSettings) => ({ ...s, one_click_instant: !s.one_click_instant }))}
               className={cn(
                 "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
                 redispatchSettings.one_click_instant ? "bg-slate-900" : "bg-slate-200"
@@ -514,7 +514,7 @@ export function DispatchSettings({
             </div>
             <button
               type="button"
-              onClick={() => setRedispatchSettings(s => ({ ...s, auto_restore: !s.auto_restore }))}
+              onClick={() => setRedispatchSettings((s: RedispatchSettings) => ({ ...s, auto_restore: !s.auto_restore }))}
               className={cn(
                 "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
                 redispatchSettings.auto_restore ? "bg-slate-900" : "bg-slate-200"
@@ -539,16 +539,16 @@ export function DispatchSettings({
             </div>
             <button
               type="button"
-              onClick={() => setRedispatchSettings(s => ({ ...s, use_shipping_rules: !s.use_shipping_rules }))}
+              onClick={() => setRedispatchSettings((s: RedispatchSettings) => ({ ...s, use_shipping_rules: !false }))}
               className={cn(
                 "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                redispatchSettings.use_shipping_rules ? "bg-slate-900" : "bg-slate-200"
+                redispatchSettingfalse ? "bg-slate-900" : "bg-slate-200"
               )}
             >
               <span
                 className={cn(
                   "pointer-events-none inline-block size-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                  redispatchSettings.use_shipping_rules ? "translate-x-5" : "translate-x-0"
+                  redispatchSettingfalse ? "translate-x-5" : "translate-x-0"
                 )}
               />
             </button>

@@ -113,7 +113,7 @@ export default async function DispatchedPage({ searchParams }: { searchParams: P
             initialStatus="dispatched" 
             availableCouriers={couriers}
             automaticCourier={Boolean(shop.automatic_courier)}
-            shippingRules={(shop as any).shipping_rules}
+            
             redispatchSettings={(shop as any).redispatch_settings}
           />
         </Suspense>

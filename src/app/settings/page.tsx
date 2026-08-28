@@ -19,14 +19,10 @@ import { ShopifyCard } from "@/features/settings/shopify-card";
 import { ShopifyConnect } from "@/features/settings/shopify-connect";
 import { CourierSettings, type CourierConfig } from "@/features/settings/courier-settings";
 import { DispatchSettings } from "@/features/settings/dispatch-settings";
-import { IntegrationAuditLog } from "@/features/settings/integration-audit-log";
 import { PasskeyManager } from "@/features/settings/passkey-manager";
 import { SecuritySettings } from "@/features/settings/security-settings";
-import { TeamSettings } from "@/features/settings/team-settings";
 import { TelegramSettings } from "@/features/settings/telegram-settings";
-import { SystemHealth } from "@/features/settings/system-health";
 import { SettingsTabs } from "@/features/settings/settings-tabs";
-import { DeveloperConsole } from "@/features/settings/developer-console";
 
 import { getAuthenticatedUser } from "@/lib/auth/session";
 
@@ -235,53 +231,6 @@ export default async function SettingsPage({
           </section>
         )}
 
-        {/* ── Team ────────────────────────────────────────────────────── */}
-        {activeTab === "team" && shop && (
-          <section>
-            <div className="mb-4">
-              <h2 className="text-base font-bold text-slate-900">Team</h2>
-              <p className="text-sm text-slate-500">Manage who has access to your store workspace.</p>
-            </div>
-            <Suspense fallback={<div className="py-8 text-center text-sm text-slate-500">Loading team settings...</div>}>
-              <TeamTabAsync shopId={shop.id} orgId={shop.organization_id} currentUserId={user.id} currentUserRole={currentUserRole} />
-            </Suspense>
-          </section>
-        )}
-
-        {/* ── Logs ────────────────────────────────────────────────────── */}
-        {activeTab === "logs" && shop && (
-          <section>
-            <div className="mb-4">
-              <h2 className="text-base font-bold text-slate-900">Integration History</h2>
-              <p className="text-sm text-slate-500">Recent credential and connection events. No credential values are stored.</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-5 py-4">
-              <IntegrationAuditLog shopId={shop.id} />
-            </div>
-          </section>
-        )}
-
-        {/* ── System Health ────────────────────────────────────────────── */}
-        {activeTab === "health" && (
-          <section>
-            <div className="mb-4">
-              <h2 className="text-base font-bold text-slate-900">System Health</h2>
-              <p className="text-sm text-slate-500">Live status of all connected services.</p>
-            </div>
-            <SystemHealth />
-          </section>
-        )}
-        {/* ── Developer ───────────────────────────────────────────────── */}
-        {activeTab === "developer" && currentUserRole === "developer" && (
-          <section>
-            <div className="mb-4">
-              <h2 className="text-base font-bold text-slate-900">Developer Console</h2>
-              <p className="text-sm text-slate-500">Manage all tenant organizations and perform system administrative tasks.</p>
-            </div>
-            <DeveloperConsole />
-          </section>
-        )}
-
       </SettingsTabs>
     </AppShell>
   );
@@ -339,47 +288,5 @@ async function DispatchTabAsync({
   );
 }
 
-async function TeamTabAsync({ shopId, orgId, currentUserId, currentUserRole }: { shopId: string, orgId: string, currentUserId: string, currentUserRole: string }) {
-  const admin = createAdminClient();
-  const supabase = await createServerSupabaseClient();
-  
-  const members: Array<any> = [];
-  const invitations: Array<any> = [];
 
-  const [{ data: orgMemberships }, { data: orgInvitations }, { data: { users } }] = await Promise.all([
-    admin.from("memberships").select("id,user_id,role,created_at,profiles(full_name)").eq("organization_id", orgId),
-    supabase.from("organization_invitations").select("id, email, role, status, created_at, expires_at").eq("organization_id", orgId).neq("status", "accepted").order("created_at", { ascending: false }),
-    admin.auth.admin.listUsers({ perPage: 1000 })
-  ]);
-    
-  if (orgMemberships) {
-    const userMap = new Map(users.map((u) => [u.id, u]));
-    for (const m of orgMemberships as any[]) {
-      const authUser = userMap.get(m.user_id);
-      const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
-      members.push({
-        id: m.id,
-        user_id: m.user_id,
-        role: m.role,
-        email: authUser?.email,
-        full_name: profile?.full_name ?? undefined,
-        created_at: m.created_at,
-      });
-    }
-  }
-
-  if (orgInvitations) {
-    invitations.push(...orgInvitations);
-  }
-
-  return (
-    <TeamSettings
-      organizationId={orgId}
-      members={members}
-      invitations={invitations}
-      currentUserId={currentUserId}
-      currentUserRole={currentUserRole}
-    />
-  );
-}
 

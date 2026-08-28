@@ -116,7 +116,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             shopId={shop.id} 
             automaticCourier={Boolean(shop.automatic_courier)} 
             availableCouriers={couriers} 
-            shippingRules={(shop as any).shipping_rules}
+            
             redispatchSettings={(shop as any).redispatch_settings}
           />
         </Suspense>

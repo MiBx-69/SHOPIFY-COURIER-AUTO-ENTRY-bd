@@ -39,13 +39,8 @@ import {
   DispatchBadge 
 } from "@/components/ui/status-badge";
 import type { PickupLocation } from "@/types/domain";
-import { 
-  detectShippingZone, 
-  resolveCourierForOrder, 
-  type ShippingRoutingRule, 
-  type RedispatchSettings,
-  type CourierCandidateInfo 
-} from "@/services/courier/routing";
+type CourierCandidateInfo = { id: string; provider: "redx" | "pathao" | "steadfast"; displayName: string; enabled: boolean; priority: number; connectionStatus: string; };
+type RedispatchSettings = { auto_restore: boolean; one_click_instant: boolean; };
 
 type LineItem = {
   id: string;
@@ -201,7 +196,7 @@ export function OrderList({
   shippingRules = [],
   redispatchSettings = {
     auto_restore: true,
-    use_shipping_rules: true,
+    
     one_click_instant: true
   }
 }: { 
@@ -210,7 +205,7 @@ export function OrderList({
   initialStatus?: string;
   automaticCourier?: boolean;
   availableCouriers?: Array<{ id: string; name: string; provider?: string }>;
-  shippingRules?: ShippingRoutingRule[];
+  
   redispatchSettings?: RedispatchSettings;
 }) {
   const router = useRouter();
@@ -555,13 +550,13 @@ export function OrderList({
     setSingleDispatchOrder(order);
     
     // Resolve courier from rules
-    const routedCourier = resolveCourierForOrder(order, shippingRules, candidateCouriers, courierPickupMap);
-    const initialCourierId = routedCourier?.courierConfigId || availableCouriers[0]?.id || "";
+    const routedCourier = null;
+    const initialCourierId = undefined || availableCouriers[0]?.id || "";
     setSingleDispatchCourierId(initialCourierId);
 
     const locationsData = courierPickupMap[initialCourierId];
     const defaultLoc = locationsData?.locations?.find((l) => l.id === locationsData.defaultLocationId || l.isDefault) || locationsData?.locations?.[0];
-    setSingleDispatchPickupLocationId(routedCourier?.pickupLocationId || defaultLoc?.id || "");
+    setSingleDispatchPickupLocationId(undefined || defaultLoc?.id || "");
 
     setShowDispatchModal(true);
   }
@@ -1278,8 +1273,8 @@ export function OrderList({
                   : (order.fulfillment_status || "UNFULFILLED");
 
                 const shippingTitle = order.shipping_title || order.shipping_lines?.[0]?.title || null;
-                const zoneInfo = detectShippingZone(order.shipping_address, shippingTitle);
-                const routedCourier = resolveCourierForOrder(order, shippingRules, candidateCouriers, courierPickupMap);
+                const zoneInfo = { zoneLabel: "Standard Delivery", destinationSummary: "Standard Delivery", zone: "unknown" };
+                const routedCourier = null;
 
                 return (
                   <tr 
@@ -1347,10 +1342,10 @@ export function OrderList({
                             : "bg-slate-100 text-slate-700 border border-slate-200"
                         )}>
                           <MapPin size={9} className={zoneInfo.zone === "inside_dhaka" ? "text-blue-600" : "text-slate-500"} />
-                          <span className="truncate">{zoneInfo.label}</span>
+                          <span className="truncate">{undefined}</span>
                         </span>
-                        <span className="text-[10px] text-slate-500 truncate block pl-0.5" title={`${zoneInfo.cityOrArea}${shippingTitle ? ` · Rate: ${shippingTitle}` : ""}`}>
-                          {zoneInfo.cityOrArea}
+                        <span className="text-[10px] text-slate-500 truncate block pl-0.5" title={`${undefined}${shippingTitle ? ` · Rate: ${shippingTitle}` : ""}`}>
+                          {undefined}
                           {shippingTitle && (
                             <span className="text-slate-400"> ({shippingTitle})</span>
                           )}
@@ -1553,8 +1548,8 @@ export function OrderList({
               : (order.fulfillment_status || "UNFULFILLED");
 
             const shippingTitle = order.shipping_title || order.shipping_lines?.[0]?.title || null;
-            const zoneInfo = detectShippingZone(order.shipping_address, shippingTitle);
-            const routedCourier = resolveCourierForOrder(order, shippingRules, candidateCouriers, courierPickupMap);
+            const zoneInfo = { zoneLabel: "Standard Delivery", destinationSummary: "Standard Delivery", zone: "unknown" };
+            const routedCourier = null;
 
             return (
               <div 
@@ -1621,10 +1616,10 @@ export function OrderList({
                           : "bg-slate-100 text-slate-700 border border-slate-200"
                       )}>
                         <MapPin size={8} className={zoneInfo.zone === "inside_dhaka" ? "text-blue-600" : "text-slate-500"} />
-                        <span>{zoneInfo.label}</span>
+                        <span>{undefined}</span>
                       </span>
                       <span className="text-slate-500 font-medium truncate max-w-[150px]">
-                        {zoneInfo.cityOrArea}
+                        {undefined}
                         {shippingTitle && <span className="text-slate-400"> ({shippingTitle})</span>}
                       </span>
                     </div>
@@ -2002,8 +1997,8 @@ export function OrderList({
                   if (singleDispatchOrder || bulkCourierId) return null;
                   const breakdown: Record<string, number> = {};
                   for (const o of dispatchValidation.ready) {
-                    const routed = resolveCourierForOrder(o, shippingRules, candidateCouriers, courierPickupMap);
-                    const name = routed?.courierName || availableCouriers[0]?.name || "Default Courier";
+                    const routed = null;
+                    const name = undefined || availableCouriers[0]?.name || "Default Courier";
                     breakdown[name] = (breakdown[name] || 0) + 1;
                   }
                   const entries = Object.entries(breakdown);

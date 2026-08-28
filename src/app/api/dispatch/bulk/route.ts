@@ -3,9 +3,16 @@ import { apiError, currentUser } from "@/lib/api/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { bulkDispatchSchema } from "@/lib/validation/schemas";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
-import { resolveCourierForOrder, type ShippingRoutingRule, type CourierCandidateInfo } from "@/services/courier/routing";
 import { PickupLocationService } from "@/services/courier/pickup-locations";
 
+type CourierCandidateInfo = {
+  id: string;
+  provider: "redx" | "pathao" | "steadfast";
+  displayName: string;
+  enabled: boolean;
+  priority: number;
+  connectionStatus: string;
+};
 // ─── Concurrency-limited pool ─────────────────────────────────────────────────
 // Runs `handler` for each item but limits simultaneous executions to `concurrency`.
 async function runWithConcurrency<TItem, TResult>(
@@ -150,22 +157,15 @@ export async function POST(request: NextRequest) {
         // Per-order Courier & Pickup Location Resolution
         const shop = shopConfigMap.get(order.shop_id);
         const candidates = configsByShop.get(order.shop_id) || [];
-        const shippingRules = ((shop as any)?.shipping_rules || []) as ShippingRoutingRule[];
 
         let chosenConfigId = input.courierConfigId;
         let chosenPickupLocationId = input.pickupLocationId;
 
-        // If no explicit manual courier override, resolve automatically based on Inside/Outside Dhaka rules & shipping rules
+        // If no explicit manual courier override, pick the first enabled connected courier
         if (!chosenConfigId) {
-          const resolved = resolveCourierForOrder(order, shippingRules, candidates);
-          if (resolved) {
-            chosenConfigId = resolved.courierConfigId;
-            chosenPickupLocationId = chosenPickupLocationId || resolved.pickupLocationId;
-          } else {
-            const firstEnabled = candidates.find((c) => c.enabled && c.connectionStatus === "connected");
-            if (firstEnabled) {
-              chosenConfigId = firstEnabled.id;
-            }
+          const firstEnabled = candidates.find((c) => c.enabled && c.connectionStatus === "connected");
+          if (firstEnabled) {
+            chosenConfigId = firstEnabled.id;
           }
         }
 

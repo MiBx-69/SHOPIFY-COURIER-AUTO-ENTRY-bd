@@ -4,9 +4,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { DispatchService } from "@/services/dispatch/dispatch-service";
 import { enforceRateLimit } from "@/lib/security/rate-limit";
 import { invalidateOrderCaches, redis } from "@/lib/redis";
-import { resolveCourierForOrder, type ShippingRoutingRule, type CourierCandidateInfo } from "@/services/courier/routing";
-import { PickupLocationService } from "@/services/courier/pickup-locations";
 import { z } from "zod";
+import { PickupLocationService } from "@/services/courier/pickup-locations";
+
+type CourierCandidateInfo = {
+  id: string;
+  provider: "redx" | "pathao" | "steadfast";
+  displayName: string;
+  enabled: boolean;
+  priority: number;
+  connectionStatus: string;
+};
 
 const redispatchSchema = z.object({
   orderId: z.string().uuid().optional(),
@@ -111,21 +119,13 @@ export async function POST(request: NextRequest) {
 
       const shop = shopMap.get(order.shop_id);
       const candidates = configsByShop.get(order.shop_id) || [];
-      const shippingRules = ((shop as any)?.shipping_rules || []) as ShippingRoutingRule[];
-
       let chosenConfigId = body.courierConfigId;
       let chosenPickupLocationId = body.pickupLocationId;
 
       if (!chosenConfigId) {
-        const resolved = resolveCourierForOrder(order, shippingRules, candidates);
-        if (resolved) {
-          chosenConfigId = resolved.courierConfigId;
-          chosenPickupLocationId = chosenPickupLocationId || resolved.pickupLocationId;
-        } else {
-          const firstEnabled = candidates.find((c) => c.enabled && c.connectionStatus === "connected");
-          if (firstEnabled) {
-            chosenConfigId = firstEnabled.id;
-          }
+        const firstEnabled = candidates.find((c) => c.enabled && c.connectionStatus === "connected");
+        if (firstEnabled) {
+          chosenConfigId = firstEnabled.id;
         }
       }
 

@@ -11,9 +11,6 @@ const TABS = [
   { id: "dispatch", label: "Dispatch", icon: Settings2 },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "security", label: "Security", icon: Shield },
-  { id: "team", label: "Team", icon: Users },
-  { id: "logs", label: "Logs", icon: FileText },
-  { id: "health", label: "Health", icon: Activity },
 ];
 
 interface Props {
@@ -26,9 +23,6 @@ export function SettingsTabs({ activeTab, currentUserRole, children }: Props) {
   const searchParams = useSearchParams();
 
   const tabs = [...TABS];
-  if (currentUserRole === 'developer') {
-    tabs.push({ id: "developer", label: "Developer", icon: Settings2 }); // Reusing Settings2 or similar
-  }
 
   return (
     <div className="flex flex-col gap-5 md:flex-row md:gap-7 w-full min-w-0">
