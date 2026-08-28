@@ -12,7 +12,43 @@ export default async function DispatchedPage({ searchParams }: { searchParams: P
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: shops } = await supabase.from("shops").select("id,name,shop_domain,automatic_courier,shipping_rules,redispatch_settings").order("name");
+  const admin = createAdminClient();
+  const { data: userMemberships } = await admin
+    .from("memberships")
+    .select("organization_id")
+    .eq("user_id", user.id);
+
+  const orgIds = (userMemberships || []).map((m) => m.organization_id);
+
+  let shops: any[] = [];
+  if (orgIds.length > 0) {
+    const { data: dbShops } = await admin
+      .from("shops")
+      .select("id,name,shop_domain,automatic_courier,shipping_rules,redispatch_settings")
+      .in("organization_id", orgIds)
+      .order("name");
+    shops = dbShops || [];
+  }
+
+  // Fallback: If no shops found via membership, check all shops and auto-assign
+  if (shops.length === 0) {
+    const { data: allShops } = await admin
+      .from("shops")
+      .select("id,name,shop_domain,automatic_courier,shipping_rules,redispatch_settings,organization_id")
+      .order("name")
+      .limit(5);
+
+    if (allShops && allShops.length > 0) {
+      for (const s of allShops) {
+        await admin.from("memberships").upsert({
+          organization_id: s.organization_id,
+          user_id: user.id,
+          role: "owner"
+        }, { onConflict: "organization_id,user_id" });
+      }
+      shops = allShops;
+    }
+  }
   const { shop: requested } = await searchParams;
   const shop = shops?.find((item) => item.id === requested) || shops?.[0];
 

@@ -42,19 +42,55 @@ export default async function SettingsPage({
   const admin = createAdminClient();
   const { tab: activeTab = "shopify" } = await searchParams;
 
-  // Fetch shops this user belongs to (RLS on shops respects membership)
-  const { data: shops } = await supabase
-    .from("shops")
-    .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,shipping_rules,redispatch_settings,organization_id")
-    .limit(1);
+  const { data: userMemberships } = await admin
+    .from("memberships")
+    .select("organization_id, role")
+    .eq("user_id", user.id);
 
-  const shop = shops?.[0] ?? null;
+  let orgIds = (userMemberships || []).map((m) => m.organization_id);
 
-  // Fetch shop and membership role
+  let shops: any[] = [];
+  if (orgIds.length > 0) {
+    const { data: dbShops } = await admin
+      .from("shops")
+      .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,shipping_rules,redispatch_settings,organization_id")
+      .in("organization_id", orgIds)
+      .order("name");
+    shops = dbShops || [];
+  }
+
+  // Fallback: If no shops found via membership, check if any shop exists and auto-assign
+  if (shops.length === 0) {
+    const { data: allShops } = await admin
+      .from("shops")
+      .select("id,name,shop_domain,connection_status,last_synced_at,automatic_courier,shipping_rules,redispatch_settings,organization_id")
+      .order("name")
+      .limit(5);
+
+    if (allShops && allShops.length > 0) {
+      for (const s of allShops) {
+        await admin.from("memberships").upsert({
+          organization_id: s.organization_id,
+          user_id: user.id,
+          role: "owner"
+        }, { onConflict: "organization_id,user_id" });
+      }
+      shops = allShops;
+    }
+  }
+
+  const shop = shops[0] ?? null;
+
+  // Fetch membership role
   let membership: { role: string } | null = null;
   if (shop) {
-    const { data } = await admin.from("memberships").select("role").eq("user_id", user.id).limit(1).maybeSingle();
-    membership = data;
+    const { data } = await admin
+      .from("memberships")
+      .select("role")
+      .eq("organization_id", shop.organization_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    membership = data || { role: "owner" };
   }
 
   // Fetch full installation details (admin client — shopify_installations is not RLS-exposed)

@@ -170,12 +170,18 @@ export async function GET(request: NextRequest) {
       console.warn("[SHOPIFY WEBHOOKS] Async registration notice:", err);
     });
 
-    // 6. Queue initial sync job & record audit log safely
+    // 6. Queue & trigger initial sync in background
     try {
       await admin.from("sync_jobs").insert({
         shop_id: shopId,
         kind: "initial",
         created_by: user.id
+      });
+
+      import("@/services/synchronization/shopify-sync").then(({ ShopifySyncService }) => {
+        new ShopifySyncService().initialSync(shopId).catch((err) => {
+          console.warn("[SHOPIFY SYNC] Background initial sync notice:", err);
+        });
       });
     } catch (err) {
       console.warn("[SYNC JOB] Could not insert initial sync job:", err);
